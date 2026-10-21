@@ -1,0 +1,30 @@
+{
+  "name": "raahsetu",
+  "version": "2.0.0",
+  "private": true,
+  "description": "RaahSetu 2.0 \u2014 fleet operations, constrained route optimization (OptiRoute), GreenFleet estimates and dispatch control tower.",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "setup": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "setup:ci": "npm ci && npm --prefix backend ci && npm --prefix frontend ci",
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "start": "concurrently -k -n api,web -c cyan,magenta \"npm --prefix backend start\" \"npm --prefix frontend start\"",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
+    "test": "npm --prefix backend test && npm --prefix frontend test",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
+    "db:deploy": "npm --prefix backend run db:deploy",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "db:seed": "npm --prefix backend run db:seed",
+    "db:reset": "npm --prefix backend run db:reset",
+    "benchmark": "npm --prefix backend run benchmark"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

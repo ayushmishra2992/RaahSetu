@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+
+# Build output & caches
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.turbo/
+.cache/
+.eslintcache
+
+# Generated Prisma client (regenerated on install)
+backend/src/generated/
+
+# Environment & secrets — only *.env.example files are committed
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Uploaded documents & test artefacts
+backend/uploads/
+backend/.test-uploads/
+
+# Logs & temp files
+*.log
+npm-debug.log*
+logs/
+tmp/
+*.tmp
+
+# Local database dumps
+*.dump
+*.sql.gz
+*.backup
+dumps/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# AI-agent scratch folders from earlier tooling
+.agents/
+.claude/
+.cursor/
+.devin/
+.windsurf/

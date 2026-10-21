@@ -1,0 +1,565 @@
+// RaahSetu 2.0 — PostgreSQL schema (Prisma 7)
+// Every tenant-owned table carries `companyId`; the API always derives the
+// company scope from the authenticated user, never from client input.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  DRIVER
+  DISPATCHER
+}
+
+enum VehicleType {
+  TRUCK
+  MINI_TRUCK
+  VAN
+  PICKUP
+  TRAILER
+  TANKER
+}
+
+enum FuelType {
+  DIESEL
+  PETROL
+  CNG
+  ELECTRIC
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  ON_TRIP
+  MAINTENANCE
+  INACTIVE
+}
+
+enum DriverStatus {
+  AVAILABLE
+  ON_TRIP
+  OFF_DUTY
+  INACTIVE
+}
+
+enum DocumentType {
+  RC
+  INSURANCE
+  PUC
+  FITNESS
+  PERMIT
+  DRIVING_LICENSE
+  OTHER
+}
+
+enum LocationType {
+  DEPOT
+  WAREHOUSE
+  CUSTOMER
+  OTHER
+}
+
+enum OrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum OrderStatus {
+  PENDING
+  ASSIGNED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum TripStatus {
+  PLANNED
+  DISPATCHED
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+enum StopType {
+  DEPOT_START
+  PICKUP
+  DROP
+  DEPOT_END
+}
+
+enum StopStatus {
+  PENDING
+  ARRIVED
+  COMPLETED
+  SKIPPED
+}
+
+enum OptimizationAlgorithm {
+  GREEDY_INSERTION
+  LOCAL_SEARCH
+  SIMULATED_ANNEALING
+}
+
+enum OptimizationStatus {
+  COMPLETED
+  FAILED
+}
+
+enum ScenarioType {
+  VEHICLE_BREAKDOWN
+  ROAD_CLOSURE
+  URGENT_ORDER
+  DRIVER_UNAVAILABLE
+}
+
+enum ScenarioStatus {
+  EVALUATED
+  APPROVED
+  REJECTED
+}
+
+enum BillingDocumentKind {
+  INVOICE
+  DELIVERY_CHALLAN
+}
+
+enum BillingStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+// ───────────────────────────── Tenancy & users ─────────────────────────────
+
+model Company {
+  id        Int     @id @default(autoincrement())
+  name      String
+  gstNumber String? @unique
+  address   String?
+  city      String?
+  state     String?
+  phone     String?
+  /// GreenFleet / cost assumptions (validated by zod, see src/modules/settings)
+  settings  Json    @default("{}")
+
+  users              User[]
+  vehicles           Vehicle[]
+  drivers            Driver[]
+  documents          ComplianceDocument[]
+  locations          Location[]
+  roadNodes          RoadNode[]
+  roadEdges          RoadEdge[]
+  orders             Order[]
+  trips              Trip[]
+  optimizationRuns   OptimizationRun[]
+  scenarios          Scenario[]
+  billingDocuments   BillingDocument[]
+  fuelRecords        FuelRecord[]
+  auditEvents        AuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         UserRole  @default(EMPLOYEE)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  driver Driver?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// ───────────────────────────── Fleet ─────────────────────────────
+
+model Vehicle {
+  id                 Int           @id @default(autoincrement())
+  companyId          Int
+  company            Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  registrationNumber String
+  type               VehicleType
+  make               String?
+  model              String?
+  year               Int?
+  capacityKg         Int
+  fuelType           FuelType      @default(DIESEL)
+  /// km per litre (or km per kg for CNG, km per kWh for electric) at empty load
+  mileageKmPerUnit   Float
+  avgSpeedKmph       Float         @default(40)
+  status             VehicleStatus @default(AVAILABLE)
+  odometerKm         Int           @default(0)
+  depotLocationId    Int?
+  depotLocation      Location?     @relation("VehicleDepot", fields: [depotLocationId], references: [id], onDelete: SetNull)
+
+  documents   ComplianceDocument[]
+  trips       Trip[]
+  fuelRecords FuelRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, registrationNumber])
+  @@index([companyId, status])
+}
+
+model Driver {
+  id            Int          @id @default(autoincrement())
+  companyId     Int
+  company       Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  phone         String
+  licenseNumber String
+  licenseExpiry DateTime
+  status        DriverStatus @default(AVAILABLE)
+  maxShiftHours Float        @default(10)
+  userId        Int?         @unique
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  documents ComplianceDocument[]
+  trips     Trip[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, licenseNumber])
+  @@index([companyId, status])
+}
+
+model ComplianceDocument {
+  id             Int          @id @default(autoincrement())
+  companyId      Int
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type           DocumentType
+  documentNumber String
+  issuedOn       DateTime?
+  expiresOn      DateTime?
+  notes          String?
+  vehicleId      Int?
+  vehicle        Vehicle?     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driverId       Int?
+  driver         Driver?      @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  /// Uploaded file metadata. Files live in a private directory (UPLOAD_DIR), never served statically.
+  fileName       String?
+  fileMimeType   String?
+  fileSizeBytes  Int?
+  storageKey     String?      @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, expiresOn])
+}
+
+// ───────────────────────────── Geography ─────────────────────────────
+
+model Location {
+  id         Int          @id @default(autoincrement())
+  companyId  Int
+  company    Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  address    String?
+  type       LocationType @default(CUSTOMER)
+  lat        Float
+  lng        Float
+  roadNodeId Int?
+  roadNode   RoadNode?    @relation(fields: [roadNodeId], references: [id], onDelete: SetNull)
+
+  vehiclesAtDepot Vehicle[]  @relation("VehicleDepot")
+  pickupOrders    Order[]    @relation("OrderPickup")
+  dropOrders      Order[]    @relation("OrderDrop")
+  tripStops       TripStop[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+/// A node of the company's (synthetic or imported) road network graph.
+model RoadNode {
+  id        Int     @id @default(autoincrement())
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  lat       Float
+  lng       Float
+
+  locations Location[]
+  outgoing  RoadEdge[] @relation("EdgeFrom")
+  incoming  RoadEdge[] @relation("EdgeTo")
+
+  @@index([companyId])
+}
+
+model RoadEdge {
+  id            Int      @id @default(autoincrement())
+  companyId     Int
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fromNodeId    Int
+  fromNode      RoadNode @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNodeId      Int
+  toNode        RoadNode @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+  distanceKm    Float
+  speedKmph     Float    @default(45)
+  bidirectional Boolean  @default(true)
+  isClosed      Boolean  @default(false)
+  name          String?
+
+  @@index([companyId])
+}
+
+// ───────────────────────────── Orders & trips ─────────────────────────────
+
+model Order {
+  id               Int           @id @default(autoincrement())
+  companyId        Int
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orderNumber      String
+  customerName     String
+  customerPhone    String?
+  pickupLocationId Int
+  pickupLocation   Location      @relation("OrderPickup", fields: [pickupLocationId], references: [id], onDelete: Restrict)
+  dropLocationId   Int
+  dropLocation     Location      @relation("OrderDrop", fields: [dropLocationId], references: [id], onDelete: Restrict)
+  weightKg         Int
+  priority         OrderPriority @default(NORMAL)
+  readyAt          DateTime?
+  windowStart      DateTime?
+  windowEnd        DateTime?
+  serviceMinutes   Int           @default(20)
+  status           OrderStatus   @default(PENDING)
+  notes            String?
+  declaredValue    Float?
+
+  tripStops TripStop[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, orderNumber])
+  @@index([companyId, status])
+}
+
+model Trip {
+  id                Int        @id @default(autoincrement())
+  companyId         Int
+  company           Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tripNumber        String
+  vehicleId         Int
+  vehicle           Vehicle    @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  driverId          Int
+  driver            Driver     @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  status            TripStatus @default(PLANNED)
+  plannedStart      DateTime
+  plannedEnd        DateTime?
+  actualStart       DateTime?
+  actualEnd         DateTime?
+  plannedDistanceKm Float?
+  estFuelUnits      Float?
+  estCost           Float?
+  estCo2Kg          Float?
+  optimizationRunId Int?
+  optimizationRun   OptimizationRun? @relation(fields: [optimizationRunId], references: [id], onDelete: SetNull)
+  verificationToken String     @unique
+  notes             String?
+
+  stops            TripStop[]
+  events           TripEvent[]
+  billingDocuments BillingDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, tripNumber])
+  @@index([companyId, status])
+}
+
+model TripStop {
+  id             Int        @id @default(autoincrement())
+  tripId         Int
+  trip           Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  sequence       Int
+  type           StopType
+  locationId     Int
+  location       Location   @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  orderId        Int?
+  order          Order?     @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  plannedArrival DateTime?
+  actualArrival  DateTime?
+  status         StopStatus @default(PENDING)
+
+  @@unique([tripId, sequence])
+}
+
+model TripEvent {
+  id         Int         @id @default(autoincrement())
+  tripId     Int
+  trip       Trip        @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fromStatus TripStatus?
+  toStatus   TripStatus
+  note       String?
+  userId     Int?
+  createdAt  DateTime    @default(now())
+
+  @@index([tripId])
+}
+
+// ───────────────────────────── OptiRoute & scenarios ─────────────────────────────
+
+model OptimizationRun {
+  id            Int                   @id @default(autoincrement())
+  companyId     Int
+  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById   Int?
+  name          String?
+  algorithm     OptimizationAlgorithm
+  status        OptimizationStatus
+  seed          Int
+  /// Normalised request (weights, constraints, order/vehicle ids, overrides)
+  request       Json
+  /// Full result: routes, unserved orders, violations, objective breakdown
+  result        Json
+  objective     Float?
+  feasible      Boolean
+  totalDistanceKm Float?
+  totalCo2Kg    Float?
+  totalCost     Float?
+  unservedCount Int                   @default(0)
+  runtimeMs     Int
+  distanceSource String
+  dispatchedAt  DateTime?
+
+  trips            Trip[]
+  baseForScenarios Scenario[] @relation("ScenarioBaseRun")
+  resultOfScenario Scenario[] @relation("ScenarioResultRun")
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+}
+
+model Scenario {
+  id           Int            @id @default(autoincrement())
+  companyId    Int
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  type         ScenarioType
+  params       Json
+  status       ScenarioStatus @default(EVALUATED)
+  baseRunId    Int
+  baseRun      OptimizationRun @relation("ScenarioBaseRun", fields: [baseRunId], references: [id], onDelete: Cascade)
+  resultRunId  Int?
+  resultRun    OptimizationRun? @relation("ScenarioResultRun", fields: [resultRunId], references: [id], onDelete: SetNull)
+  comparison   Json?
+  createdById  Int?
+  decidedById  Int?
+  decidedAt    DateTime?
+  decisionNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// ───────────────────────────── Billing & verification ─────────────────────────────
+
+model BillingDocument {
+  id                Int                 @id @default(autoincrement())
+  companyId         Int
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind              BillingDocumentKind @default(INVOICE)
+  number            String
+  status            BillingStatus       @default(DRAFT)
+  tripId            Int?
+  trip              Trip?               @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  customerName      String
+  customerGstin     String?
+  customerAddress   String?
+  /// GST % applied to subtotal (0 for challans)
+  taxRatePercent    Float               @default(0)
+  subtotal          Float               @default(0)
+  taxAmount         Float               @default(0)
+  total             Float               @default(0)
+  issuedAt          DateTime?
+  dueDate           DateTime?
+  notes             String?
+  verificationToken String              @unique
+
+  items BillingItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, kind, number])
+  @@index([companyId, status])
+}
+
+model BillingItem {
+  id          Int             @id @default(autoincrement())
+  documentId  Int
+  document    BillingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Float
+  unit        String          @default("nos")
+  rate        Float
+  amount      Float
+}
+
+// ───────────────────────────── GreenFleet & audit ─────────────────────────────
+
+/// Actual fuel/energy purchases logged by operators (measured data, unlike estimates).
+model FuelRecord {
+  id         Int      @id @default(autoincrement())
+  companyId  Int
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vehicleId  Int
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  filledAt   DateTime
+  quantity   Float
+  totalCost  Float
+  odometerKm Int
+  notes      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, vehicleId, filledAt])
+}
+
+model AuditEvent {
+  id         Int      @id @default(autoincrement())
+  companyId  Int
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId     Int?
+  action     String
+  entityType String
+  entityId   Int?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([companyId, createdAt])
+}
