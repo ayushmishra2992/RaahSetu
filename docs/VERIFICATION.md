@@ -1,6 +1,6 @@
 # Verification status
 
-Verified on 21 Oct 2026 in a Linux sandbox (Node 22.22, npm 10.9, PostgreSQL 16.15) from a **fresh `git clone`** of this repository, installing strictly from the committed lockfiles with `npm run setup:ci`, against newly created empty databases.
+Verified on 21–22 Oct 2026 in a Linux sandbox (Node 22.22, npm 10.9, PostgreSQL 16.15) from a **fresh `git clone`** of this repository, installing strictly from the committed lockfiles with `npm run setup:ci`, against newly created empty databases.
 
 | Check | Command | Result |
 |---|---|---|
@@ -19,6 +19,9 @@ Verified on 21 Oct 2026 in a Linux sandbox (Node 22.22, npm 10.9, PostgreSQL 16.
 | Next.js production build (27 routes) | `npm --prefix frontend run build` | ✅ passed |
 | Production servers start; `/api/health` reports DB ok directly and through the Next.js proxy | `node dist/server.js` + `next start` | ✅ passed |
 | Browser end-to-end run (Playwright/Chromium against production servers, 23 steps) | sandbox script | ✅ 23/23 |
+| CI-equivalent run: fresh clone, no `backend/.env`, only `TEST_DATABASE_URL` set (as in `.github/workflows/ci.yml`) | `npm run setup:ci && npm run check` + benchmark smoke run | ✅ passed |
+| One-click demo login (`NEXT_PUBLIC_DEMO_MODE=true`) | browser | ✅ passed |
+| Next.js standalone output used by `frontend/Dockerfile`, serving pages and proxying the API | `NEXT_OUTPUT=standalone next build` + `node server.js` | ✅ passed |
 
 The browser run covered: signed-out redirect; login as dispatcher; all 12 main pages render without errors; OptiRoute plan via UI; create trips from plan; dispatch; driver starts trip, completes every stop and the trip; manager creates and issues an invoice; logged-out QR verification page; driver-unavailable scenario evaluated and approved; Control Tower afterwards; read-only viewer has no write buttons.
 
@@ -30,6 +33,9 @@ The browser run covered: signed-out redirect; login as dispatcher; all 12 main p
 | Hand-written v2 migration exactly matches `schema.prisma` (no drift) | Needs the same schema engine. The full integration suite, run through the generated Prisma client, passed against the migrated schema. | `cd backend; npx prisma migrate dev --create-only --name drift_check` should report that the schema is already in sync. If it creates a migration, inspect it and either keep or delete it. |
 | Windows / PowerShell specifics | Sandbox is Linux. | Follow the README quick start. |
 | Interactive dev mode (`npm run dev`) | Production servers were tested instead. | `npm run dev` |
+| `docker compose up --build` (Dockerfiles, compose file) | Docker Hub is blocked in this sandbox, so base images could not be pulled. The YAML parses and the standalone Next.js server was tested. | `docker compose up --build` |
+| GitHub Actions workflow on GitHub itself | Runs after you push; the same commands passed locally. | Push to `main` and open the Actions tab |
+| Free-tier deployment (Neon, Render, Vercel) | Needs your accounts. | Follow `docs/DEPLOYMENT.md` |
 
 ## Known remaining audit finding (development-only)
 
