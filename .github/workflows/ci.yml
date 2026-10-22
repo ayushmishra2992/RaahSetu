@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Type-check, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: raahsetu
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: raahsetu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U raahsetu"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Integration tests reset this database and apply every committed migration.
+      TEST_DATABASE_URL: postgresql://raahsetu:ci-only-password@localhost:5432/raahsetu_test?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install (from lockfiles)
+        run: npm run setup:ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests (unit + PostgreSQL integration)
+        run: npm test
+
+      - name: Production builds
+        run: npm run build
+
+      - name: Optimiser benchmark (synthetic, smoke run)
+        run: npm --prefix backend run benchmark -- --sizes 10x3,25x5 --seeds 1 --iterations 200

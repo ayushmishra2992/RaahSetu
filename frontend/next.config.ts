@@ -8,6 +8,8 @@ const backendUrl = (process.env.BACKEND_URL ?? "http://localhost:5000").replace(
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Docker image uses the self-contained server; normal builds are unchanged.
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   reactStrictMode: true,
   turbopack: { root: process.cwd() },
   outputFileTracingRoot: process.cwd(),

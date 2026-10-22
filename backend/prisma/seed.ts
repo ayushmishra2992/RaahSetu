@@ -13,8 +13,8 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { estimateTrip, DEFAULT_COST_MODEL } from "../src/optimizer/costModel";
 import { haversineKm } from "../src/optimizer/geo";
 
-if (process.env.NODE_ENV === "production") {
-  console.error("Refusing to seed demo data with NODE_ENV=production");
+if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
+  console.error("Refusing to seed demo data with NODE_ENV=production (set ALLOW_DEMO_SEED=true only for a public demo deployment)");
   process.exit(1);
 }
 if (!process.env.DATABASE_URL) {
