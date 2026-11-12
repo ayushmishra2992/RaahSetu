@@ -4,6 +4,7 @@ import type { Prisma } from "../../generated/prisma/client";
 import { badRequest, conflict, notFound } from "../../lib/errors";
 import { docNumber, round } from "../../lib/numbering";
 import type { AuthContext } from "../../middleware/auth";
+import { lockFleet } from "../trips/tripFactory";
 import { getRun, runOptimization, type OptimizeRequest, type Overrides, type StoredRequest, type StoredResult, type VirtualOrder } from "../optiroute/optiroute.service";
 
 export const ScenarioInput = z.discriminatedUnion("type", [
@@ -153,10 +154,19 @@ export async function decideScenario(auth: AuthContext, id: number, approve: boo
   const scenario = await prisma.scenario.findFirst({ where: { id, companyId: auth.companyId }, include: { resultRun: true } });
   if (!scenario) throw notFound("Scenario");
   if (scenario.status !== "EVALUATED") throw conflict(`Scenario already ${scenario.status}`);
+  const decision = { decidedById: auth.userId, decidedAt: new Date(), decisionNote: note ?? null };
+  // Claims the decision atomically: of two concurrent approve/reject requests,
+  // the second matches 0 rows and fails, so side effects are applied only once.
+  const claim = async (tx: Prisma.TransactionClient, status: "APPROVED" | "REJECTED") => {
+    const r = await tx.scenario.updateMany({ where: { id, companyId: auth.companyId, status: "EVALUATED" }, data: { status, ...decision } });
+    if (r.count !== 1) throw conflict("This scenario was already decided by someone else. Reload to see the outcome.");
+  };
   if (!approve) {
-    const s = await prisma.scenario.update({ where: { id }, data: { status: "REJECTED", decidedById: auth.userId, decidedAt: new Date(), decisionNote: note ?? null } });
-    await prisma.auditEvent.create({ data: { companyId: auth.companyId, userId: auth.userId, action: "scenario.rejected", entityType: "Scenario", entityId: id } });
-    return s;
+    return prisma.$transaction(async (tx) => {
+      await claim(tx, "REJECTED");
+      await tx.auditEvent.create({ data: { companyId: auth.companyId, userId: auth.userId, action: "scenario.rejected", entityType: "Scenario", entityId: id } });
+      return tx.scenario.findUniqueOrThrow({ where: { id } });
+    });
   }
   if (!scenario.resultRun) throw conflict("Scenario has no evaluated plan");
   const params = scenario.params as Record<string, unknown>;
@@ -167,7 +177,16 @@ export async function decideScenario(auth: AuthContext, id: number, approve: boo
       where: { companyId: auth.companyId, optimizationRunId: scenario.baseRunId, status: { in: ["PLANNED", "DISPATCHED"] } },
       include: { stops: true },
     });
+    // Lock order: fleet rows → scenario/trip rows → orders/stops (same everywhere, avoids deadlocks).
+    const scenarioVehicle = scenario.type === "VEHICLE_BREAKDOWN" ? [Number(params.vehicleId)] : [];
+    const scenarioDriver = scenario.type === "DRIVER_UNAVAILABLE" ? [Number(params.driverId)] : [];
+    await lockFleet(tx, auth.companyId, [...pendingTrips.map((t) => t.vehicleId), ...scenarioVehicle], [...pendingTrips.map((t) => t.driverId), ...scenarioDriver]);
+    await claim(tx, "APPROVED");
     for (const t of pendingTrips) {
+      // Only cancel the trip if it is still in the status we read; if a driver
+      // started it in the meantime, abort instead of cancelling a running trip.
+      const cancelled = await tx.trip.updateMany({ where: { id: t.id, status: t.status }, data: { status: "CANCELLED" } });
+      if (cancelled.count !== 1) throw conflict(`Trip ${t.tripNumber} changed while approving. Re-evaluate the scenario.`);
       const orderIds = t.stops.filter((s) => s.orderId).map((s) => s.orderId!);
       await tx.order.updateMany({ where: { id: { in: orderIds }, status: "ASSIGNED" }, data: { status: "PENDING" } });
       await tx.tripStop.updateMany({ where: { tripId: t.id, status: "PENDING" }, data: { status: "SKIPPED" } });
@@ -175,7 +194,6 @@ export async function decideScenario(auth: AuthContext, id: number, approve: boo
         await tx.vehicle.updateMany({ where: { id: t.vehicleId, status: "ON_TRIP" }, data: { status: "AVAILABLE" } });
         await tx.driver.updateMany({ where: { id: t.driverId, status: "ON_TRIP" }, data: { status: "AVAILABLE" } });
       }
-      await tx.trip.update({ where: { id: t.id }, data: { status: "CANCELLED" } });
       await tx.tripEvent.create({ data: { tripId: t.id, fromStatus: t.status, toStatus: "CANCELLED", note: `Replaced by approved scenario #${scenario.id}`, userId: auth.userId } });
     }
 
@@ -223,7 +241,7 @@ export async function decideScenario(auth: AuthContext, id: number, approve: boo
       });
     }
 
-    const updated = await tx.scenario.update({ where: { id }, data: { status: "APPROVED", decidedById: auth.userId, decidedAt: new Date(), decisionNote: note ?? null } });
+    const updated = await tx.scenario.findUniqueOrThrow({ where: { id } });
     await tx.auditEvent.create({
       data: { companyId: auth.companyId, userId: auth.userId, action: "scenario.approved", entityType: "Scenario", entityId: id, metadata: { cancelledTrips: pendingTrips.map((t) => t.id), createdOrders: [...idMap.values()] } },
     });

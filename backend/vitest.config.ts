@@ -5,8 +5,6 @@ const testDb = process.env.TEST_DATABASE_URL;
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts"],
-    globalSetup: ["tests/globalSetup.ts"],
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 120_000,
@@ -19,5 +17,25 @@ export default defineConfig({
       AUTH_RATE_LIMIT_PER_15_MIN: "1000",
       PUBLIC_APP_URL: "http://localhost:3000",
     },
+    projects: [
+      {
+        // Pure logic: never connects to a database, so it runs anywhere.
+        extends: true,
+        test: {
+          name: "unit",
+          include: ["tests/unit/**/*.test.ts"],
+          env: { DATABASE_URL: "postgresql://unused:unused@localhost:5432/unused" },
+        },
+      },
+      {
+        // Resets TEST_DATABASE_URL before running (see tests/globalSetup.ts).
+        extends: true,
+        test: {
+          name: "integration",
+          include: ["tests/integration/**/*.test.ts"],
+          globalSetup: ["tests/globalSetup.ts"],
+        },
+      },
+    ],
   },
 });

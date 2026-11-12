@@ -14,7 +14,7 @@ import {
 } from "../../optimizer/distance";
 import { InstanceError, solve } from "../../optimizer/solver";
 import type { Instance, OptLocation, OptOrder, OptVehicle, Solution } from "../../optimizer/types";
-import { createTripsFromRoutes } from "../trips/tripFactory";
+import { createTripsFromRoutes, lockFleet } from "../trips/tripFactory";
 import { costModelFrom, getCompanySettings, weightsFrom, WeightsSchema } from "../company/settings";
 
 export const COMPLIANCE_BLOCKING_TYPES = ["RC", "INSURANCE", "PUC", "FITNESS", "PERMIT"] as const;
@@ -405,6 +405,17 @@ export async function dispatchRun(auth: AuthContext, runId: number) {
   const planStart = new Date(result.planStart);
 
   return prisma.$transaction(async (tx) => {
+    // Lock order everywhere: fleet rows → trip/run rows → orders/stops (avoids deadlocks).
+    // Locking the plan's vehicles/drivers first means the checks below cannot be
+    // invalidated by another dispatch before we commit.
+    await lockFleet(tx, auth.companyId, result.routes.map((r) => r.vehicleId), result.routes.map((r) => r.driverId));
+    // Claim the run: a concurrent dispatch of the same run blocks on this row,
+    // then matches 0 rows once we commit, so trips are created only once.
+    const claimed = await tx.optimizationRun.updateMany({
+      where: { id: run.id, companyId: auth.companyId, dispatchedAt: null },
+      data: { dispatchedAt: new Date() },
+    });
+    if (claimed.count !== 1) throw conflict("This plan has already been converted into trips");
     const orders = await tx.order.findMany({ where: { companyId: auth.companyId, id: { in: orderIds } } });
     const notPending = orders.filter((o) => o.status !== "PENDING");
     if (orders.length !== orderIds.length || notPending.length) {
@@ -427,7 +438,6 @@ export async function dispatchRun(auth: AuthContext, runId: number) {
       );
     }
     const trips = await createTripsFromRoutes(tx, auth, result.routes, planStart, { runId: run.id, note: `Created from OptiRoute run #${run.id}` });
-    await tx.optimizationRun.update({ where: { id: run.id }, data: { dispatchedAt: new Date() } });
     await tx.auditEvent.create({
       data: { companyId: auth.companyId, userId: auth.userId, action: "optimization.dispatched", entityType: "OptimizationRun", entityId: run.id, metadata: { trips: trips.map((t) => t.id) } },
     });

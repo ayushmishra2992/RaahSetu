@@ -26,6 +26,12 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
       res.status(404).json({ error: { code: "NOT_FOUND", message: "Record not found" } });
       return;
     }
+    // Transaction aborted by a write conflict/deadlock (P2034), or a raw query
+    // failing with PostgreSQL's serialization (40001) / deadlock (40P01) codes.
+    if (err.code === "P2034" || (err.code === "P2010" && /40001|40P01|deadlock/i.test(err.message))) {
+      res.status(409).json({ error: { code: "CONFLICT", message: "Another request changed the same records at the same time. Please retry." } });
+      return;
+    }
     if (err.code === "P2003") {
       res.status(409).json({
         error: { code: "CONFLICT", message: "This record is referenced by other records and cannot be changed" },

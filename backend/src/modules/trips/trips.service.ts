@@ -4,7 +4,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from "../../
 import type { AuthContext } from "../../middleware/auth";
 import { COMPLIANCE_BLOCKING_TYPES, buildInstance, type OptimizeRequest } from "../optiroute/optiroute.service";
 import { solve } from "../../optimizer/solver";
-import { createTripsFromRoutes } from "./tripFactory";
+import { createTripsFromRoutes, lockFleet } from "./tripFactory";
 
 export const TRANSITIONS: Record<TripStatus, TripStatus[]> = {
   PLANNED: ["DISPATCHED", "CANCELLED"],
@@ -35,7 +35,15 @@ export async function transitionTrip(auth: AuthContext, tripId: number, to: Trip
   const orderIds = trip.stops.filter((s) => s.orderId != null).map((s) => s.orderId!);
 
   await prisma.$transaction(async (tx) => {
+    // Lock order: fleet rows → trip row → orders/stops (same everywhere, avoids deadlocks).
+    await lockFleet(tx, auth.companyId, [trip.vehicleId], [trip.driverId]);
+    // Claim the transition atomically: only succeeds if the trip is still in the
+    // status we validated above, so two concurrent requests cannot both apply.
+    const claimed = await tx.trip.updateMany({ where: { id: trip.id, companyId: auth.companyId, status: trip.status }, data: { status: to } });
+    if (claimed.count !== 1) throw conflict("This trip was changed by someone else. Reload and try again.");
+
     if (to === "DISPATCHED") {
+      // Vehicle and driver rows are locked, so these reads are current until we commit.
       const [vehicle, driver] = await Promise.all([
         tx.vehicle.findUniqueOrThrow({ where: { id: trip.vehicleId }, include: { documents: true } }),
         tx.driver.findUniqueOrThrow({ where: { id: trip.driverId } }),
@@ -54,7 +62,10 @@ export async function transitionTrip(auth: AuthContext, tripId: number, to: Trip
       await tx.tripStop.updateMany({ where: { tripId: trip.id, type: "DEPOT_START" }, data: { status: "COMPLETED", actualArrival: now } });
     }
     if (to === "COMPLETED") {
-      const open = trip.stops.filter((s) => (s.type === "PICKUP" || s.type === "DROP") && (s.status === "PENDING" || s.status === "ARRIVED"));
+      // Re-read stops inside the transaction: stop updates lock the trip row too,
+      // so none can slip in between this check and the commit.
+      const stops = await tx.tripStop.findMany({ where: { tripId: trip.id } });
+      const open = stops.filter((s) => (s.type === "PICKUP" || s.type === "DROP") && (s.status === "PENDING" || s.status === "ARRIVED"));
       if (open.length) throw conflict(`Complete or skip all stops first (${open.length} remaining)`);
       await tx.trip.update({ where: { id: trip.id }, data: { actualEnd: now } });
       await tx.tripStop.updateMany({ where: { tripId: trip.id, type: "DEPOT_END" }, data: { status: "COMPLETED", actualArrival: now } });
@@ -67,7 +78,6 @@ export async function transitionTrip(auth: AuthContext, tripId: number, to: Trip
       await tx.vehicle.updateMany({ where: { id: trip.vehicleId, status: "ON_TRIP" }, data: { status: "AVAILABLE" } });
       await tx.driver.updateMany({ where: { id: trip.driverId, status: "ON_TRIP" }, data: { status: "AVAILABLE" } });
     }
-    await tx.trip.update({ where: { id: trip.id }, data: { status: to } });
     await tx.tripEvent.create({ data: { tripId: trip.id, fromStatus: trip.status, toStatus: to, note: note ?? null, userId: auth.userId } });
     await tx.auditEvent.create({
       data: { companyId: auth.companyId, userId: auth.userId, action: `trip.${to.toLowerCase()}`, entityType: "Trip", entityId: trip.id, metadata: { from: trip.status } },
@@ -78,17 +88,24 @@ export async function transitionTrip(auth: AuthContext, tripId: number, to: Trip
 export type StopAction = "ARRIVE" | "COMPLETE" | "SKIP";
 
 export async function updateStop(auth: AuthContext, tripId: number, stopId: number, action: StopAction) {
+  // Outside the transaction: 404 for other tenants and for drivers' foreign trips.
   const trip = await loadTripForAction(auth, tripId);
-  if (trip.status !== "IN_TRANSIT") throw conflict("Stops can only be updated while the trip is IN_TRANSIT");
-  const stop = trip.stops.find((s) => s.id === stopId);
-  if (!stop) throw notFound("Stop");
-  if (stop.type !== "PICKUP" && stop.type !== "DROP") throw badRequest("Depot stops are updated automatically");
-  if (stop.status === "COMPLETED" || stop.status === "SKIPPED") throw conflict(`Stop is already ${stop.status}`);
   const now = new Date();
-  const pickupOf = (orderId: number | null) => trip.stops.find((s) => s.type === "PICKUP" && s.orderId === orderId);
-  const dropOf = (orderId: number | null) => trip.stops.find((s) => s.type === "DROP" && s.orderId === orderId);
 
   await prisma.$transaction(async (tx) => {
+    // Lock the trip row so stop updates and trip transitions on this trip run one
+    // at a time, then validate against data read under that lock.
+    const [locked] = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM "Trip" WHERE id = ${trip.id} AND "companyId" = ${auth.companyId} FOR UPDATE`;
+    if (!locked) throw notFound("Trip");
+    if (locked.status !== "IN_TRANSIT") throw conflict("Stops can only be updated while the trip is IN_TRANSIT");
+    const stops = await tx.tripStop.findMany({ where: { tripId: trip.id }, orderBy: { sequence: "asc" } });
+    const stop = stops.find((s) => s.id === stopId);
+    if (!stop) throw notFound("Stop");
+    if (stop.type !== "PICKUP" && stop.type !== "DROP") throw badRequest("Depot stops are updated automatically");
+    if (stop.status === "COMPLETED" || stop.status === "SKIPPED") throw conflict(`Stop is already ${stop.status}`);
+    const pickupOf = (orderId: number | null) => stops.find((s) => s.type === "PICKUP" && s.orderId === orderId);
+    const dropOf = (orderId: number | null) => stops.find((s) => s.type === "DROP" && s.orderId === orderId);
+
     if (action === "ARRIVE") {
       if (stop.status !== "PENDING") throw conflict("Already arrived");
       await tx.tripStop.update({ where: { id: stop.id }, data: { status: "ARRIVED", actualArrival: now } });

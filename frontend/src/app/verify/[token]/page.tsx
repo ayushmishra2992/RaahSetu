@@ -37,7 +37,13 @@ export default function VerifyPage() {
           <>
             <div className="mt-3 flex items-center gap-2">
               <h1 className="text-lg font-semibold">{humanize(data.type)} {data.number}</h1>
-              <Badge color={data.valid ? "green" : "red"}>{data.valid ? "Genuine record" : "Cancelled"}</Badge>
+              {data.valid ? (
+                <Badge color="green">Genuine record</Badge>
+              ) : data.status === "DRAFT" ? (
+                <Badge color="amber">Not issued — draft only</Badge>
+              ) : (
+                <Badge color="red">Cancelled</Badge>
+              )}
             </div>
             <dl className="mt-4 grid grid-cols-2 gap-y-2 text-sm">
               <dt className="text-muted">Issued by</dt>

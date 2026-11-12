@@ -19,7 +19,9 @@ router.get("/:token", async (req, res) => {
   const doc = await prisma.billingDocument.findUnique({ where: { verificationToken: token }, include: { company: { select: { name: true, gstNumber: true } } } });
   if (doc) {
     res.json({
-      valid: doc.status !== "CANCELLED",
+      // Only documents that were actually issued are genuine; a DRAFT can still
+      // be edited freely, so it must never verify as valid.
+      valid: doc.status === "ISSUED" || doc.status === "PAID",
       type: doc.kind,
       number: doc.number,
       status: doc.status,

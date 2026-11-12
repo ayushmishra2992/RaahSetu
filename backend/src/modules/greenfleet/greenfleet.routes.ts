@@ -4,7 +4,7 @@ import { prisma } from "../../config/prisma";
 import { notFound } from "../../lib/errors";
 import { authOf } from "../../lib/http";
 import { round } from "../../lib/numbering";
-import { parseBody, parseQuery } from "../../lib/validate";
+import { parseBody, parseId, parseQuery } from "../../lib/validate";
 import { requirePermission } from "../../middleware/auth";
 import { estimateTrip, FUEL_UNIT } from "../../optimizer/costModel";
 import { costModelFrom, getCompanySettings } from "../company/settings";
@@ -129,7 +129,7 @@ router.get("/summary", async (req, res) => {
 
 router.get("/vehicle/:id", async (req, res) => {
   const auth = authOf(req);
-  const v = await prisma.vehicle.findFirst({ where: { id: Number(req.params.id), companyId: auth.companyId }, include: { fuelRecords: { orderBy: { filledAt: "asc" } } } });
+  const v = await prisma.vehicle.findFirst({ where: { id: parseId(req.params.id), companyId: auth.companyId }, include: { fuelRecords: { orderBy: { filledAt: "asc" } } } });
   if (!v) throw notFound("Vehicle");
   res.json({ vehicleId: v.id, observedMileage: observedEfficiency(v.fuelRecords), configuredMileage: v.mileageKmPerUnit, records: v.fuelRecords });
 });

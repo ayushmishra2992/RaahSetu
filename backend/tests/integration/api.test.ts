@@ -341,4 +341,108 @@ describe.skipIf(!enabled)("RaahSetu API (integration, real PostgreSQL)", () => {
       expect(bAudit.body.every((e: { companyId: number }) => e.companyId === B.companyId)).toBe(true);
     });
   });
+
+  describe("concurrency safety (parallel requests)", () => {
+    // A fresh company so these tests do not depend on state left by earlier ones.
+    let C: Tenant;
+    const c: Record<string, number> = {};
+    const statuses = (rs: Array<{ status: number }>) => rs.map((r) => r.status).sort();
+
+    beforeAll(async () => {
+      C = await registerCompany("c");
+      const loc = async (name: string, lat: number, lng: number, type = "CUSTOMER") =>
+        (await request(app).post("/api/locations").set(auth(C)).send({ name, lat, lng, type })).body.id as number;
+      c.depot = await loc("C Depot", 19.0, 73.0, "DEPOT");
+      c.wh = await loc("C Warehouse", 19.03, 73.02, "WAREHOUSE");
+      c.cust = await loc("C Customer", 19.08, 72.98);
+      const future = new Date(Date.now() + 365 * 86400000).toISOString();
+      for (const i of [1, 2, 3, 4]) {
+        const v = await request(app).post("/api/vehicles").set(auth(C)).send({ registrationNumber: `KA01CC000${i}`, type: "TRUCK", capacityKg: 5000, fuelType: "DIESEL", mileageKmPerUnit: 8, depotLocationId: c.depot });
+        expect(v.status).toBe(201);
+        c[`v${i}`] = v.body.id;
+        const d = await request(app).post("/api/drivers").set(auth(C)).send({ name: `C Driver ${i}`, phone: `+91 90000 1000${i}`, licenseNumber: `KA0120200000${i}0`, licenseExpiry: future });
+        expect(d.status).toBe(201);
+        c[`d${i}`] = d.body.id;
+      }
+      for (const i of [1, 2, 3]) {
+        const o = await request(app).post("/api/orders").set(auth(C)).send({ customerName: `C Cust ${i}`, pickupLocationId: c.wh, dropLocationId: c.cust, weightKg: 300 });
+        expect(o.status).toBe(201);
+        c[`o${i}`] = o.body.id;
+      }
+    });
+
+    const plan = async (orderIds: number[], vehicleId: number, driverId: number) => {
+      const r = await request(app).post("/api/optiroute/runs").set(auth(C)).send({ algorithm: "GREEDY_INSERTION", orderIds, vehicleIds: [vehicleId], assignments: [{ vehicleId, driverId }] });
+      expect(r.status).toBe(201);
+      expect(r.body.feasible).toBe(true);
+      expect(r.body.result.unserved).toHaveLength(0);
+      return r.body.id as number;
+    };
+
+    it("dispatches the same plan only once under parallel requests", async () => {
+      c.run1 = await plan([c.o1], c.v1, c.d1);
+      const rs = await Promise.all(Array.from({ length: 5 }, () => request(app).post(`/api/optiroute/runs/${c.run1}/dispatch`).set(auth(C))));
+      expect(statuses(rs)).toEqual([201, 409, 409, 409, 409]);
+      const run = await request(app).get(`/api/optiroute/runs/${c.run1}`).set(auth(C));
+      expect(run.body.trips).toHaveLength(1);
+      c.trip1 = run.body.trips[0].id;
+    });
+
+    it("never assigns the same order to two plans dispatched in parallel", async () => {
+      // Different vehicles and drivers, same orders: only the order claim can stop the second plan.
+      const runA = await plan([c.o2, c.o3], c.v2, c.d2);
+      const runB = await plan([c.o2, c.o3], c.v3, c.d3);
+      const rs = await Promise.all([runA, runB].map((id) => request(app).post(`/api/optiroute/runs/${id}/dispatch`).set(auth(C))));
+      expect(statuses(rs)).toEqual([201, 409]);
+      const trips = await request(app).get("/api/trips").set(auth(C));
+      const active = trips.body.filter((t: { status: string }) => t.status !== "CANCELLED");
+      // trip1 from the previous test + exactly one trip from runA or runB.
+      expect(active).toHaveLength(2);
+      for (const id of [c.o2, c.o3]) {
+        const o = await request(app).get(`/api/orders/${id}`).set(auth(C));
+        expect(o.body.status).toBe("ASSIGNED");
+        expect(o.body.tripStops.filter((s: { type?: string; trip: { status: string } }) => s.trip.status !== "CANCELLED").length).toBe(2); // one pickup + one drop
+      }
+      c.baseRun = rs[0].status === 201 ? runA : runB;
+    });
+
+    it("applies a trip status transition only once under parallel requests", async () => {
+      const rs = await Promise.all(Array.from({ length: 4 }, () => request(app).post(`/api/trips/${c.trip1}/status`).set(auth(C)).send({ status: "DISPATCHED" })));
+      expect(statuses(rs)).toEqual([200, 409, 409, 409]);
+      const trip = await request(app).get(`/api/trips/${c.trip1}`).set(auth(C));
+      expect(trip.body.events.filter((e: { toStatus: string }) => e.toStatus === "DISPATCHED")).toHaveLength(1);
+      expect(trip.body.vehicle.status).toBe("ON_TRIP");
+    });
+
+    it("updates a stop only once under parallel requests", async () => {
+      expect((await request(app).post(`/api/trips/${c.trip1}/status`).set(auth(C)).send({ status: "IN_TRANSIT" })).status).toBe(200);
+      const trip = await request(app).get(`/api/trips/${c.trip1}`).set(auth(C));
+      const pickup = trip.body.stops.find((s: { type: string }) => s.type === "PICKUP");
+      const rs = await Promise.all(Array.from({ length: 4 }, () => request(app).post(`/api/trips/${c.trip1}/stops/${pickup.id}`).set(auth(C)).send({ action: "ARRIVE" })));
+      expect(statuses(rs)).toEqual([200, 409, 409, 409]);
+    });
+
+    it("approves a scenario only once under parallel requests", async () => {
+      const sc = await request(app).post("/api/scenarios").set(auth(C)).send({ type: "URGENT_ORDER", name: "Parallel approval", baseRunId: c.baseRun, params: { customerName: "Concurrent Hospital", pickupLocationId: c.wh, dropLocationId: c.cust, weightKg: 50 } });
+      expect(sc.status).toBe(201);
+      const rs = await Promise.all(Array.from({ length: 3 }, () => request(app).post(`/api/scenarios/${sc.body.id}/approve`).set(auth(C)).send({})));
+      expect(statuses(rs)).toEqual([200, 409, 409]);
+      const orders = await request(app).get("/api/orders").set(auth(C));
+      expect(orders.body.filter((o: { customerName: string }) => o.customerName === "Concurrent Hospital")).toHaveLength(1);
+      const reject = await request(app).post(`/api/scenarios/${sc.body.id}/reject`).set(auth(C)).send({});
+      expect(reject.status).toBe(409);
+    });
+
+    it("does not verify DRAFT invoices as valid", async () => {
+      const inv = await request(app).post("/api/billing").set(auth(C)).send({ kind: "INVOICE", customerName: "Draft Cust", taxRatePercent: 18, items: [{ description: "Freight", quantity: 1, rate: 100 }] });
+      expect(inv.status).toBe(201);
+      const qr = await request(app).get(`/api/billing/${inv.body.id}/qr`).set(auth(C));
+      const pub = await request(app).get(`/api/public/verify/${qr.body.url.split("/verify/")[1]}`);
+      expect(pub.body).toMatchObject({ valid: false, status: "DRAFT" });
+    });
+
+    it("returns 400, not 500, for a malformed GreenFleet vehicle id", async () => {
+      expect((await request(app).get("/api/greenfleet/vehicle/abc").set(auth(C))).status).toBe(400);
+    });
+  });
 });
