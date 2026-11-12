@@ -114,7 +114,7 @@ export default function ControlTowerPage() {
           <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
             <div>
               <RouteMap points={points} lines={lines} />
-              <MapLegend />
+              <MapLegend kinds={["depot", "pickup", "drop", "vehicle"]} />
             </div>
             <div className="space-y-2">
               <SyntheticNote>{data.telemetryNote}</SyntheticNote>

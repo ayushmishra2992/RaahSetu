@@ -7,6 +7,7 @@ import { MapLegend, RouteMap, type MapLine, type MapPoint } from "@/components/R
 import { Alert, Badge, Button, Card, ConfirmButton, ErrorState, Field, Input, Loading, Modal, PageHeader, Select, SyntheticNote, Table, Td } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { fmtMinutes, fmtNum, humanize } from "@/lib/format";
+import { locationKind } from "@/lib/map";
 import type { Location, RoadEdge, RoadNode } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
@@ -68,12 +69,12 @@ export default function LocationsPage() {
 
   const points: MapPoint[] = [
     ...nodes.map((n) => ({ lat: n.lat, lng: n.lng, kind: "node" as const, label: n.name })),
-    ...(locations.data ?? []).map((l) => ({ lat: l.lat, lng: l.lng, kind: l.type === "DEPOT" ? ("depot" as const) : l.type === "WAREHOUSE" ? ("pickup" as const) : ("drop" as const) })),
+    ...(locations.data ?? []).map((l) => ({ lat: l.lat, lng: l.lng, kind: locationKind(l.type), label: l.name })),
   ];
   const pathEdges = new Set(path?.edgeIds ?? []);
   const lines: MapLine[] = edges.map((e) => ({
     points: [nodeById.get(e.fromNodeId)!, nodeById.get(e.toNodeId)!].filter(Boolean),
-    color: e.isClosed ? "#dc2626" : pathEdges.has(e.id) ? "#5b5bd6" : "#94a3b8",
+    color: e.isClosed ? "#dc2626" : pathEdges.has(e.id) ? "#5b5bd6" : "#475569",
     dashed: e.isClosed || !pathEdges.has(e.id),
     label: `${e.name ?? "Road"} ${e.distanceKm} km${e.isClosed ? " (closed)" : ""}`,
   }));
@@ -82,10 +83,10 @@ export default function LocationsPage() {
     <div className="space-y-5">
       <PageHeader title="Locations & road network" subtitle="Depots, warehouses and customers, plus the road graph OptiRoute uses for shortest paths." actions={write && <Button onClick={() => { setEditing(undefined); setModal("loc"); }}>Add location</Button>} />
       {msg && <Alert kind="info">{msg}</Alert>}
-      <Card title="Map" actions={<Badge color="amber">Schematic</Badge>}>
+      <Card title="Map" actions={<Badge color="amber">Road lines schematic</Badge>}>
         <RouteMap points={points} lines={lines} height={420} />
-        <MapLegend />
-        <p className="mt-1 text-xs text-muted">Grey dashed = open road, red = closed road, violet = last computed shortest path.</p>
+        <MapLegend kinds={["depot", "warehouse", "customer", "other", "node"]} />
+        <p className="mt-1 text-xs text-muted">Road-network edges are drawn as straight lines between junctions (schematic). Grey dashed = open road, red = closed road, violet = last computed shortest path.</p>
       </Card>
 
       <Card title={`Locations (${locations.data?.length ?? 0})`}>

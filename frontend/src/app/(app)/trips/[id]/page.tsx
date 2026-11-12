@@ -121,7 +121,7 @@ export default function TripDetailPage() {
         <div className="space-y-5">
           <Card title="Route" actions={t.simulatedPosition && <Badge color="amber">Simulated position</Badge>}>
             <RouteMap points={points} lines={[{ points: t.stops.map((s) => s.location) }]} height={300} />
-            <MapLegend />
+            <MapLegend kinds={t.simulatedPosition ? ["depot", "pickup", "drop", "vehicle"] : ["depot", "pickup", "drop"]} />
             {t.simulatedPosition && (
               <div className="mt-2"><SyntheticNote>Simulated from the planned schedule: {t.simulatedPosition.progressPct}% complete, next stop {t.simulatedPosition.nextStop ?? "—"}. No GPS device is connected.</SyntheticNote></div>
             )}
