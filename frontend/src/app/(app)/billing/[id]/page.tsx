@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { useConfirm } from "@/components/ds";
 import { Alert, Button, ConfirmButton, ErrorState, Loading, Modal, StatusBadge } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { fmtDate, fmtMoney, fmtNum } from "@/lib/format";
@@ -19,6 +20,7 @@ export default function BillingDocPage() {
   const [qr, setQr] = useState<{ url: string; dataUrl: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => {
     let active = true;
@@ -48,8 +50,14 @@ export default function BillingDocPage() {
         <Link href="/billing" className="text-sm text-brand-700">← All documents</Link>
         <div className="flex flex-wrap gap-2">
           {write && d.status === "DRAFT" && <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>}
-          {write && d.status === "DRAFT" && <Button onClick={() => act("issue")}>Issue</Button>}
-          {write && isInvoice && d.status === "ISSUED" && <Button onClick={() => act("mark-paid")}>Mark paid</Button>}
+          {write && d.status === "DRAFT" && <Button onClick={async () => {
+            const ok = await confirm({ title: `Issue ${d.number}?`, description: "Issuing records today as the issue date and locks the document against edits. Its QR code will then verify as a genuine record.", confirmLabel: "Issue document", tone: "primary" });
+            if (ok) await act("issue");
+          }}>Issue</Button>}
+          {write && isInvoice && d.status === "ISSUED" && <Button onClick={async () => {
+            const ok = await confirm({ title: `Mark ${d.number} as paid?`, description: "The invoice status changes to Paid. Payment details are not recorded in RaahSetu.", confirmLabel: "Mark paid", tone: "primary" });
+            if (ok) await act("mark-paid");
+          }}>Mark paid</Button>}
           {write && (d.status === "DRAFT" || d.status === "ISSUED") && <ConfirmButton confirmLabel="Cancel document" onConfirm={() => act("cancel")}>Cancel</ConfirmButton>}
           <Button variant="secondary" onClick={() => window.print()}>Print</Button>
         </div>
@@ -68,7 +76,7 @@ export default function BillingDocPage() {
             <p className="text-muted">{[d.seller?.address, d.seller?.city, d.seller?.state].filter(Boolean).join(", ")}</p>
           </div>
         </header>
-        <section className="grid gap-4 py-5 text-sm sm:grid-cols-2">
+        <section className="grid grid-cols-1 gap-4 py-5 text-sm sm:grid-cols-2">
           <div>
             <p className="text-xs uppercase text-muted">Bill to</p>
             <p className="font-medium">{d.customerName}</p>

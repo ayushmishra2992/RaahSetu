@@ -4,7 +4,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { Me } from "@/lib/types";
-import { Loading } from "./ui";
+import { ErrorState, Loading } from "./ds/Feedback";
+import { LogoMark } from "./shell/Logo";
 
 interface AuthCtx {
   me: Me;
@@ -61,14 +62,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   if (error)
     return (
-      <div className="mx-auto max-w-lg p-10 text-sm">
-        <p className="font-medium text-red-700">{error}</p>
-        <button className="mt-3 underline" onClick={() => window.location.reload()}>
-          Retry
-        </button>
+      <div className="grid min-h-dvh place-items-center px-4">
+        <div className="w-full max-w-md">
+          <ErrorState title="Couldn't load your session" message={error} onRetry={() => window.location.reload()} />
+        </div>
       </div>
     );
-  if (!me) return <div className="p-10"><Loading label="Checking your session…" /></div>;
+  if (!me)
+    return (
+      <div className="grid min-h-dvh place-items-center">
+        <div className="flex flex-col items-center gap-4">
+          <LogoMark size={40} />
+          <Loading variant="inline" label="Checking your session…" />
+        </div>
+      </div>
+    );
 
   return <Ctx.Provider value={{ me, can: (p) => me.permissions.includes(p), refresh: load, logout }}>{children}</Ctx.Provider>;
 }

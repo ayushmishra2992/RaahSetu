@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { FormShell } from "@/components/forms";
+import { useConfirm } from "@/components/ds";
 import { Alert, Badge, Button, ErrorState, Field, Input, Loading, Modal, PageHeader, Select, Table, Td } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { fmtDateTime, humanize } from "@/lib/format";
@@ -33,6 +34,7 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false);
   const [f, setF] = useState({ name: "", email: "", password: "", role: "DISPATCHER" });
   const [msg, setMsg] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   async function patch(id: number, body: Record<string, unknown>) {
     setMsg(null);
@@ -56,14 +58,23 @@ export default function UsersPage() {
               <Td className="font-medium">{u.name}{u.id === me.user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</Td>
               <Td>{u.email}</Td>
               <Td>
-                <Select value={u.role} disabled={u.id === me.user.id} onChange={(e) => patch(u.id, { role: e.target.value })} className="w-36">
+                <Select value={u.role} disabled={u.id === me.user.id} onChange={async (e) => {
+                  const role = e.target.value;
+                  const ok = await confirm({ title: `Change ${u.name}’s role to ${humanize(role)}?`, description: `Their access changes on their next request. ${humanize(role)}: ${ROLES.find(([r]) => r === role)?.[1] ?? ""}.`, confirmLabel: "Change role", tone: "primary" });
+                  if (ok) await patch(u.id, { role });
+                }} className="w-36">
                   {ROLES.map(([r]) => <option key={r} value={r}>{humanize(r)}</option>)}
                 </Select>
               </Td>
               <Td>{u.driver?.name ?? "—"}</Td>
               <Td className="text-xs">{fmtDateTime(u.lastLoginAt)}</Td>
               <Td>{u.isActive ? <Badge color="green">Active</Badge> : <Badge>Deactivated</Badge>}</Td>
-              <Td>{u.id !== me.user.id && <Button variant="ghost" onClick={() => patch(u.id, { isActive: !u.isActive })}>{u.isActive ? "Deactivate" : "Reactivate"}</Button>}</Td>
+              <Td>{u.id !== me.user.id && <Button variant="ghost" onClick={async () => {
+                const ok = await confirm(u.isActive
+                  ? { title: `Deactivate ${u.name}?`, description: "They are signed out on their next request and can’t sign in until reactivated. Their history is kept.", confirmLabel: "Deactivate", tone: "danger" }
+                  : { title: `Reactivate ${u.name}?`, description: `They can sign in again with their existing password and the ${humanize(u.role)} role.`, confirmLabel: "Reactivate", tone: "primary" });
+                if (ok) await patch(u.id, { isActive: !u.isActive });
+              }}>{u.isActive ? "Deactivate" : "Reactivate"}</Button>}</Td>
             </tr>
           ))}
         </Table>

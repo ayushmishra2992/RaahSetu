@@ -1,16 +1,23 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, errorMessage } from "@/lib/api";
 import { fromLocalInput, toLocalInput } from "@/lib/format";
 import type { Driver, Location, Vehicle } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { Alert, Button, Field, Input, Select } from "./ui";
 
-/** Generic submit wrapper: shows errors and busy state. */
+/**
+ * Generic submit wrapper: busy state, and on failure an error summary that
+ * receives focus so keyboard and screen-reader users hear it immediately.
+ */
 export function FormShell({ onSubmit, children, submitLabel }: { onSubmit: () => Promise<void>; children: ReactNode; submitLabel: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   async function handle(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -24,10 +31,14 @@ export function FormShell({ onSubmit, children, submitLabel }: { onSubmit: () =>
     }
   }
   return (
-    <form onSubmit={handle} className="space-y-4">
-      {error && <Alert>{error}</Alert>}
+    <form onSubmit={handle} className="space-y-4" aria-busy={busy || undefined}>
+      {error && (
+        <div ref={errorRef} tabIndex={-1} className="outline-none">
+          <Alert title="Couldn't save">{error}</Alert>
+        </div>
+      )}
       {children}
-      <div className="flex justify-end">
+      <div className="flex justify-end border-t border-line pt-4">
         <Button type="submit" loading={busy}>
           {submitLabel}
         </Button>
@@ -77,7 +88,7 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
         onSaved();
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Registration number">
           <Input required value={f.registrationNumber} onChange={set("registrationNumber")} placeholder="MH04AB1234" />
         </Field>
@@ -146,7 +157,7 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
         onSaved();
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Full name"><Input required value={f.name} onChange={set("name")} /></Field>
         <Field label="Phone"><Input required value={f.phone} onChange={set("phone")} placeholder="+91 98xxxxxxxx" /></Field>
         <Field label="Licence number"><Input required value={f.licenseNumber} onChange={set("licenseNumber")} /></Field>
@@ -167,6 +178,8 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
   );
 }
 
-export function DateTimeInput({ value, onChange, ...rest }: { value: string | null; onChange: (iso: string | null) => void; required?: boolean }) {
+export function DateTimeInput({ value, onChange, ...rest }: { value: string | null; onChange: (iso: string | null) => void; required?: boolean; id?: string }) {
   return <Input type="datetime-local" value={toLocalInput(value)} onChange={(e) => onChange(fromLocalInput(e.target.value))} {...rest} />;
 }
+// Lets <Field> link its label/hint/error to this control.
+DateTimeInput.__rsFormControl = true;

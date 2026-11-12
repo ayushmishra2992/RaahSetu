@@ -29,7 +29,7 @@ export default function SettingsPage() {
         <>
           <Card title="Company profile">
             <FormShell submitLabel="Save profile" onSubmit={async () => { await api("/company", { method: "PATCH", body: profile }); await refresh(); setSaved("Company profile saved."); }}>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {(Object.keys(profile) as Array<keyof typeof profile>).map((k) => (
                   <Field key={k} label={k === "gstNumber" ? "GSTIN" : humanize(k)}><Input value={profile[k]} onChange={(e) => setProfile((p) => ({ ...p, [k]: e.target.value }))} required={k === "name"} /></Field>
                 ))}
@@ -39,7 +39,7 @@ export default function SettingsPage() {
           <Card title="GreenFleet & cost assumptions">
             <FormShell submitLabel="Save assumptions" onSubmit={async () => { await api("/company", { method: "PATCH", body: { settings } }); await refresh(); setSaved("Assumptions saved. New estimates and plans will use them."); }}>
               <p className="text-sm text-muted">These are the factors behind every fuel, cost and CO₂ estimate. Defaults are placeholders — set your actual prices and verify emission factors for formal reporting.</p>
-              <div className="grid gap-3 sm:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                 {FUELS.map((f) => (
                   <Field key={`p${f}`} label={`${humanize(f)} price (₹/${UNITS[f]})`}><Input type="number" step="any" min={0} value={settings.fuelPricePerUnit[f]} onChange={(e) => setSettings((s) => ({ ...s, fuelPricePerUnit: { ...s.fuelPricePerUnit, [f]: num(e.target.value) } }))} /></Field>
                 ))}
@@ -51,7 +51,7 @@ export default function SettingsPage() {
                 <Field label="Document alert window (days)"><Input type="number" min={1} max={365} value={settings.documentExpiryAlertDays} onChange={(e) => setSettings((s) => ({ ...s, documentExpiryAlertDays: num(e.target.value) }))} /></Field>
               </div>
               <h3 className="text-sm font-semibold">Default OptiRoute weights</h3>
-              <div className="grid gap-3 sm:grid-cols-6">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
                 {(Object.keys(settings.defaultWeights) as Array<keyof Settings["defaultWeights"]>).map((k) => (
                   <Field key={k} label={humanize(k)}><Input type="number" step="any" min={0} value={settings.defaultWeights[k]} onChange={(e) => setSettings((s) => ({ ...s, defaultWeights: { ...s.defaultWeights, [k]: num(e.target.value) } }))} /></Field>
                 ))}
@@ -64,7 +64,7 @@ export default function SettingsPage() {
       )}
       <Card title="Change your password">
         <FormShell submitLabel="Change password" onSubmit={async () => { await api("/auth/change-password", { body: pw }); setPw({ currentPassword: "", newPassword: "" }); setSaved("Password changed."); }}>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Current password"><Input type="password" autoComplete="current-password" required value={pw.currentPassword} onChange={(e) => setPw((p) => ({ ...p, currentPassword: e.target.value }))} /></Field>
             <Field label="New password" hint="8+ characters with a letter and a number"><Input type="password" autoComplete="new-password" required value={pw.newPassword} onChange={(e) => setPw((p) => ({ ...p, newPassword: e.target.value }))} /></Field>
           </div>

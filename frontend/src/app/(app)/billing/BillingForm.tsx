@@ -48,7 +48,7 @@ export function BillingForm({ doc, presetTripId, onSaved }: { doc?: BillingDoc; 
       const saved = await api<{ id: number }>(doc ? `/billing/${doc.id}` : "/billing", { method: doc ? "PUT" : "POST", body });
       onSaved(saved.id);
     }}>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {!doc && <Field label="Document"><Select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="INVOICE">Tax invoice</option><option value="DELIVERY_CHALLAN">Delivery challan</option></Select></Field>}
         <Field label="Trip (optional)"><Select value={f.tripId} onChange={set("tripId")}><option value="">— none —</option>{trips.data?.map((t) => <option key={t.id} value={t.id}>{t.tripNumber} · {t.vehicle.registrationNumber}</option>)}</Select></Field>
         <Field label="Customer"><Input required value={f.customerName} onChange={set("customerName")} /></Field>

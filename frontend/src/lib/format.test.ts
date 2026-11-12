@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, errorMessage } from "./api";
-import { fmtMinutes, fromLocalInput, humanize, toLocalInput } from "./format";
+import { expiryStateOf, fmtMinutes, fromLocalInput, humanize, toLocalInput } from "./format";
 
 describe("format helpers", () => {
   it("humanizes enum values", () => {
@@ -28,5 +28,15 @@ describe("errorMessage", () => {
   });
   it("includes exclusion reasons", () => {
     expect(errorMessage(new ApiError(422, "No vehicle", [{ label: "MH01", reason: "PUC expired" }]))).toContain("MH01: PUC expired");
+  });
+});
+
+describe("expiryStateOf", () => {
+  const now = Date.parse("2026-11-12T00:00:00Z");
+  it("matches the backend rule", () => {
+    expect(expiryStateOf(null, 30, now)).toBe("NO_EXPIRY");
+    expect(expiryStateOf("2026-11-11T00:00:00Z", 30, now)).toBe("EXPIRED");
+    expect(expiryStateOf("2026-12-12T00:00:00Z", 30, now)).toBe("EXPIRING_SOON");
+    expect(expiryStateOf("2026-12-13T00:00:00Z", 30, now)).toBe("VALID");
   });
 });

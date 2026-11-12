@@ -47,7 +47,7 @@ function NewScenario() {
         const s = await api<{ id: number }>("/scenarios", { body: { type, name: name || TYPES.find((t) => t[0] === type)![1], baseRunId: Number(baseRunId), params: p } });
         router.push(`/scenarios/${s.id}`);
       }}>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="Base plan"><Select required value={baseRunId} onChange={(e) => setBaseRunId(e.target.value)}><option value="">Select a run…</option>{runs.data?.map((r) => <option key={r.id} value={r.id}>#{r.id} {r.name} ({fmtDateTime(r.createdAt)})</option>)}</Select></Field>
           <Field label="Disruption"><Select value={type} onChange={(e) => setType(e.target.value as typeof type)}>{TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
           <Field label="Scenario name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. MH04AB1234 clutch failure" /></Field>
@@ -74,7 +74,7 @@ function NewScenario() {
           </div>
         )}
         {type === "URGENT_ORDER" && (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Customer"><Input required value={urgent.customerName} onChange={(e) => setUrgent((u) => ({ ...u, customerName: e.target.value }))} /></Field>
             <Field label="Pickup"><Select required value={urgent.pickupLocationId} onChange={(e) => setUrgent((u) => ({ ...u, pickupLocationId: e.target.value }))}><option value="">Select…</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
             <Field label="Drop"><Select required value={urgent.dropLocationId} onChange={(e) => setUrgent((u) => ({ ...u, dropLocationId: e.target.value }))}><option value="">Select…</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>

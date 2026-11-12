@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { FormShell } from "@/components/forms";
 import { MapLegend, RouteMap, type MapLine, type MapPoint } from "@/components/RouteMap";
+import { useConfirm } from "@/components/ds";
 import { Alert, Badge, Button, Card, ConfirmButton, ErrorState, Field, Input, Loading, Modal, PageHeader, Select, SyntheticNote, Table, Td } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { fmtMinutes, fmtNum, humanize } from "@/lib/format";
@@ -19,7 +20,7 @@ function LocationForm({ loc, nodes, onSaved }: { loc?: Location; nodes: RoadNode
       await api(loc ? `/locations/${loc.id}` : "/locations", { method: loc ? "PATCH" : "POST", body: { ...f, lat: Number(f.lat), lng: Number(f.lng), address: f.address || null, roadNodeId: f.roadNodeId ? Number(f.roadNodeId) : null } });
       onSaved();
     }}>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Name"><Input required value={f.name} onChange={set("name")} /></Field>
         <Field label="Type"><Select value={f.type} onChange={set("type")}>{["DEPOT", "WAREHOUSE", "CUSTOMER", "OTHER"].map((t) => <option key={t}>{t}</option>)}</Select></Field>
         <Field label="Latitude"><Input required type="number" step="any" value={f.lat} onChange={set("lat")} /></Field>
@@ -57,6 +58,7 @@ export default function LocationsPage() {
   const [path, setPath] = useState<PathResult | null>(null);
   const [pathForm, setPathForm] = useState({ from: "", to: "" });
   const [msg, setMsg] = useState<string | null>(null);
+  const confirm = useConfirm();
   const [nodeForm, setNodeForm] = useState({ name: "", lat: "", lng: "" });
   const [edgeForm, setEdgeForm] = useState({ fromNodeId: "", toNodeId: "", distanceKm: "", speedKmph: "45", name: "" });
 
@@ -108,7 +110,7 @@ export default function LocationsPage() {
         </Table>
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card title={`Road segments (${edges.length})`} actions={write && (<><Button variant="secondary" onClick={() => setModal("node")}>Add node</Button><Button variant="secondary" onClick={() => setModal("edge")}>Add segment</Button></>)}>
           <SyntheticNote>The demo network is synthetic (straight-line × 1.25). Replace with surveyed distances or an imported road graph for real operations.</SyntheticNote>
           <div className="mt-3 max-h-96 overflow-y-auto">
@@ -119,14 +121,20 @@ export default function LocationsPage() {
                   <Td className="tabular">{e.distanceKm}</Td>
                   <Td className="tabular">{e.speedKmph}</Td>
                   <Td>{e.isClosed ? <Badge color="red">Closed</Badge> : <Badge color="green">Open</Badge>}</Td>
-                  <Td>{write && <Button variant="ghost" onClick={async () => { await api(`/road-network/edges/${e.id}`, { method: "PATCH", body: { isClosed: !e.isClosed } }); network.reload(); }}>{e.isClosed ? "Reopen" : "Close"}</Button>}</Td>
+                  <Td>{write && <Button variant="ghost" onClick={() => confirm({
+                    title: `${e.isClosed ? "Reopen" : "Close"} ${nodeById.get(e.fromNodeId)?.name} ↔ ${nodeById.get(e.toNodeId)?.name}?`,
+                    description: e.isClosed ? "OptiRoute may route through this segment again in new plans." : "New OptiRoute plans and shortest paths will avoid this segment. Existing trips are not changed.",
+                    confirmLabel: e.isClosed ? "Reopen road" : "Close road",
+                    tone: e.isClosed ? "primary" : "danger",
+                    action: async () => { await api(`/road-network/edges/${e.id}`, { method: "PATCH", body: { isClosed: !e.isClosed } }); network.reload(); },
+                  })}>{e.isClosed ? "Reopen" : "Close"}</Button>}</Td>
                 </tr>
               ))}
             </Table>
           </div>
         </Card>
         <Card title="Shortest path (Dijkstra vs A*)">
-          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
             <Field label="From"><Select value={pathForm.from} onChange={(e) => setPathForm((p) => ({ ...p, from: e.target.value }))}><option value="">Select…</option>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</Select></Field>
             <Field label="To"><Select value={pathForm.to} onChange={(e) => setPathForm((p) => ({ ...p, to: e.target.value }))}><option value="">Select…</option>{nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</Select></Field>
             <Button disabled={!pathForm.from || !pathForm.to} onClick={async () => { try { setPath(await api<PathResult>(`/road-network/path?from=${pathForm.from}&to=${pathForm.to}`)); setMsg(null); } catch (e) { setMsg(errorMessage(e)); } }}>Find</Button>

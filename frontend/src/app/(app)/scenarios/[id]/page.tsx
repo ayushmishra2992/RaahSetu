@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { useConfirm } from "@/components/ds";
 import { Alert, Button, Card, ErrorState, Field, Input, Loading, PageHeader, StatusBadge, Table, Td } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { fmtDateTime, fmtNum, humanize } from "@/lib/format";
@@ -32,6 +33,7 @@ export default function ScenarioPage() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const confirm = useConfirm();
   if (loading) return <Loading />;
   if (error || !s) return <ErrorState message={error ?? "Not found"} onRetry={reload} />;
   const c = s.comparison;
@@ -78,7 +80,7 @@ export default function ScenarioPage() {
           </div>
         </Card>
       )}
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card title={`Base plan #${s.baseRunId}`} actions={<Link className="text-sm text-brand-700" href={`/optiroute/runs/${s.baseRunId}`}>Open →</Link>}><RunMap result={s.baseRun.result} /></Card>
         {s.resultRun && <Card title={`Scenario plan #${s.resultRun.id}`} actions={<Link className="text-sm text-brand-700" href={`/optiroute/runs/${s.resultRun.id}`}>Open →</Link>}><RunMap result={s.resultRun.result} /></Card>}
       </div>
@@ -87,8 +89,14 @@ export default function ScenarioPage() {
           <p className="mb-3 text-sm text-muted">Approving applies the disruption (vehicle → maintenance, driver → off duty, road closed, or urgent order created) and cancels base-plan trips that have not started, so the new plan can be dispatched.</p>
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[260px] flex-1"><Field label="Decision note"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
-            <Button loading={busy === "approve"} onClick={() => decide("approve")}>Approve & apply</Button>
-            <Button variant="secondary" loading={busy === "reject"} onClick={() => decide("reject")}>Reject</Button>
+            <Button loading={busy === "approve"} onClick={async () => {
+              const ok = await confirm({ title: `Approve “${s.name}”?`, description: "The disruption is applied to live data and base-plan trips that have not started are cancelled, so the scenario plan can be dispatched. This can't be undone.", confirmLabel: "Approve & apply", tone: "danger" });
+              if (ok) await decide("approve");
+            }}>Approve & apply</Button>
+            <Button variant="secondary" loading={busy === "reject"} onClick={async () => {
+              const ok = await confirm({ title: `Reject “${s.name}”?`, description: "The scenario is closed without changing any data.", confirmLabel: "Reject scenario", tone: "primary" });
+              if (ok) await decide("reject");
+            }}>Reject</Button>
           </div>
         </Card>
       )}

@@ -1,19 +1,108 @@
 @import "tailwindcss";
 
+/*
+ * RaahSetu design tokens (light theme).
+ * Forest green carries brand and primary actions, navy carries structure
+ * (sidebar, headings), teal is a restrained accent (focus, selection).
+ * Legacy token names (brand-*, ink, muted, line, canvas, amber-accent) are kept
+ * so existing pages adopt the new palette without edits.
+ */
 @theme {
-  --color-brand-50: #eef7f6;
-  --color-brand-100: #d5ece9;
-  --color-brand-500: #138075;
-  --color-brand-600: #0f6b62;
-  --color-brand-700: #0c5750;
-  --color-brand-900: #08332f;
-  --color-ink: #13212b;
-  --color-muted: #5b6b77;
-  --color-line: #e3e8ec;
-  --color-canvas: #f5f7f8;
+  /* Forest — brand & primary actions */
+  --color-brand-50: #eef8f5;
+  --color-brand-100: #d6efe7;
+  --color-brand-200: #addccf;
+  --color-brand-300: #7cc4b1;
+  --color-brand-400: #3fa38b;
+  --color-brand-500: #1f8a73;
+  --color-brand-600: #147060;
+  --color-brand-700: #0f5a4d;
+  --color-brand-800: #0d4a40;
+  --color-brand-900: #0b3b32;
+  --color-brand-950: #072721;
+
+  /* Navy — structure */
+  --color-navy-50: #f2f5f8;
+  --color-navy-100: #e3e9ef;
+  --color-navy-200: #c6d1dc;
+  --color-navy-300: #9aabbb;
+  --color-navy-400: #6d8196;
+  --color-navy-500: #4c6176;
+  --color-navy-600: #34485c;
+  --color-navy-700: #243648;
+  --color-navy-800: #172737;
+  --color-navy-900: #0f1c2a;
+  --color-navy-950: #0a1520;
+
+  /* Teal — accent, focus, selection */
+  --color-accent-100: #d3f2ee;
+  --color-accent-400: #2bb7a7;
+  --color-accent-500: #1a9e8f;
+  --color-accent-600: #13837a;
+
+  /* Neutrals */
+  --color-ink: #0e1a24;
+  --color-muted: #566874;
+  --color-subtle: #8a99a3;
+  --color-line: #e3e8ea;
+  --color-line-strong: #cbd4d8;
+  --color-canvas: #f4f6f6;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8faf9;
+
+  /* Semantic */
+  --color-success-50: #effaf3;
+  --color-success-600: #15803d;
+  --color-success-700: #126c34;
+  --color-warning-50: #fff8eb;
+  --color-warning-600: #b45309;
+  --color-warning-700: #92400e;
+  --color-danger-50: #fef2f2;
+  --color-danger-600: #c02626;
+  --color-danger-700: #a11d1d;
+  --color-info-50: #eff5ff;
+  --color-info-600: #1d4ed8;
+  --color-info-700: #1e40af;
+
   --color-amber-accent: #c9822b;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-xs: 0 1px 2px rgb(14 26 36 / 0.05);
+  --shadow-pop: 0 10px 30px -8px rgb(10 21 32 / 0.25), 0 2px 6px rgb(10 21 32 / 0.08);
+
+  --animate-fade-in: rs-fade-in 140ms ease-out;
+  --animate-pop-in: rs-pop-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-slide-in-left: rs-slide-in-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-slide-in-right: rs-slide-in-right 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-toast-in: rs-toast-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes rs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rs-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rs-slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
+@keyframes rs-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: none; }
+}
+@keyframes rs-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 
 html,
@@ -24,10 +113,73 @@ body {
 
 body {
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Consistent, visible keyboard focus (mouse clicks don't show it). */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--color-accent-100);
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Select chevron (appearance: none removes the native one). */
+.rs-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23566874' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 16px;
+}
+
+/* Native <dialog> backdrop (Dialog / Drawer / ConfirmDialog). */
+dialog.rs-dialog::backdrop {
+  background: rgb(10 21 32 / 0.45);
+  animation: rs-fade-in 140ms ease-out;
+}
+html.rs-scroll-locked {
+  overflow: hidden;
+}
+
+/* Tables inside a card bleed to the card edges instead of drawing a second frame. */
+.rs-card-body .rs-table {
+  border-width: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.rs-card-body > .rs-table {
+  margin-inline: -1rem;
+  width: calc(100% + 2rem);
+  border-top: 1px solid var(--color-line);
+}
+.rs-card-body > .rs-table:last-child {
+  margin-bottom: -1rem;
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+.rs-card[data-has-header="false"] > .rs-card-body > .rs-table:first-child {
+  margin-top: -1rem;
+  border-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 @media print {
@@ -44,9 +196,12 @@ body {
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 500;
-  color: #13212b;
+  color: #0e1a24;
   border-color: #d5dee3;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+.leaflet-container {
+  font-family: var(--font-sans);
 }
 .leaflet-container .leaflet-control-attribution {
   font-size: 11px;

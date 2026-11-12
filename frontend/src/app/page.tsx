@@ -27,7 +27,7 @@ export default function Landing() {
         </nav>
       </header>
       <main className="mx-auto max-w-6xl px-6 pb-20">
-        <section className="grid gap-10 py-14 lg:grid-cols-[1.2fr_1fr] lg:items-center">
+        <section className="grid grid-cols-1 gap-10 py-14 lg:grid-cols-[1.2fr_1fr] lg:items-center">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wider text-brand-600">Smart transport & fleet operations</p>
             <h1 className="mt-3 text-4xl font-semibold leading-tight tracking-tight text-ink sm:text-5xl">Plan feasible routes. Dispatch with confidence. See the trade-offs.</h1>
@@ -54,7 +54,7 @@ export default function Landing() {
             <p className="mt-4 text-muted">Every plan is re-checked by an independent validator; infeasible plans are never marked feasible, and unserved orders come with a reason.</p>
           </div>
         </section>
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {modules.map(([t, d]) => (
             <div key={t} className="rounded-lg border border-line p-5">
               <h2 className="font-semibold text-ink">{t}</h2>

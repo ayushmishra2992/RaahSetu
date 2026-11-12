@@ -61,7 +61,7 @@ export default function GreenFleetPage() {
       </SyntheticNote>
 
       <Card title="Which vehicle is greenest for a job?">
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
           <Field label="Distance (km)"><Input type="number" min={1} value={est.distanceKm} onChange={(e) => setEst((x) => ({ ...x, distanceKm: e.target.value }))} /></Field>
           <Field label="Load (kg)"><Input type="number" min={0} value={est.loadKg} onChange={(e) => setEst((x) => ({ ...x, loadKg: e.target.value }))} /></Field>
           <Button onClick={async () => {
@@ -122,7 +122,7 @@ export default function GreenFleetPage() {
         )}
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.4fr]">
         {can("fuel:write") && (
           <Card title="Log a fuel / charge fill">
             <FormShell submitLabel="Save fill" onSubmit={async () => {

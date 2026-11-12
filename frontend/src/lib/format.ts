@@ -34,6 +34,13 @@ export function daysUntil(d: string | Date): number {
   return Math.floor((new Date(d).getTime() - Date.now()) / 86_400_000);
 }
 
+/** "Expired 3 days ago" / "Expires today" / "Expires in 12 days" for a whole-day offset. */
+export function fmtRelDays(days: number, verbs: [past: string, future: string] = ["Expired", "Expires"]): string {
+  if (days < 0) return `${verbs[0]} ${-days} day${days === -1 ? "" : "s"} ago`;
+  if (days === 0) return `${verbs[1]} today`;
+  return `${verbs[1]} in ${days} day${days === 1 ? "" : "s"}`;
+}
+
 export function isPast(d: string | Date | null | undefined): boolean {
   return !!d && new Date(d).getTime() < Date.now();
 }
@@ -41,4 +48,18 @@ export function isPast(d: string | Date | null | undefined): boolean {
 /** Today's date as YYYY-MM-DD in local time. */
 export function todayIso(): string {
   return toLocalInput(new Date()).slice(0, 10);
+}
+
+const DOC_TYPE: Record<string, string> = { RC: "RC", PUC: "PUC", INSURANCE: "Insurance", FITNESS: "Fitness", PERMIT: "Permit", DRIVING_LICENSE: "Driving licence", OTHER: "Other" };
+/** Compliance document type label (keeps acronyms such as RC and PUC upper-case). */
+export const docTypeLabel = (t?: string | null) => (t ? (DOC_TYPE[t] ?? humanize(t)) : "—");
+
+export type ExpiryState = "EXPIRED" | "EXPIRING_SOON" | "VALID" | "NO_EXPIRY";
+/** Same rule as the backend's documents `expiryState()`, for records that don't carry it. */
+export function expiryStateOf(expiresOn: string | Date | null | undefined, alertDays: number, now = Date.now()): ExpiryState {
+  if (!expiresOn) return "NO_EXPIRY";
+  const days = Math.floor((new Date(expiresOn).getTime() - now) / 86_400_000);
+  if (days < 0) return "EXPIRED";
+  if (days <= alertDays) return "EXPIRING_SOON";
+  return "VALID";
 }
