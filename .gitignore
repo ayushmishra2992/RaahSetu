@@ -51,6 +51,8 @@ desktop.ini
 *.swp
 
 # AI-agent scratch folders from earlier tooling
+# Next.js 16 `next dev` regenerates this file on every start
+frontend/AGENTS.md
 .agents/
 .claude/
 .cursor/
