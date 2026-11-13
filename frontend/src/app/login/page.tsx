@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { Logo } from "@/components/shell/Logo";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { Alert, Button, Field, Input } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { safeNext } from "@/lib/redirect";
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 const DEMO_PASSWORD = "Demo@1234";
@@ -29,7 +31,7 @@ function LoginForm() {
     try {
       await api("/auth/login", { body: { email: loginEmail, password: loginPassword } });
       const next = params.get("next");
-      router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
+      router.replace(safeNext(next, window.location.origin));
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);
@@ -81,9 +83,8 @@ export default function LoginPage() {
   return (
     <div className="grid min-h-screen place-items-center bg-canvas px-4">
       <div className="w-full max-w-sm">
-        <Link href="/" className="mb-6 flex items-center justify-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-md bg-brand-600 text-sm font-bold text-white">RS</span>
-          <span className="text-lg font-semibold">RaahSetu 2.0</span>
+        <Link href="/" className="mb-6 flex items-center justify-center">
+          <Logo tone="light" size="lg" />
         </Link>
         <div className="rounded-lg border border-line bg-white p-6">
           <h1 className="mb-4 text-lg font-semibold">Log in</h1>
@@ -97,7 +98,8 @@ export default function LoginPage() {
             Register here
           </Link>
         </p>
-        {!DEMO_MODE && <p className="mt-2 text-center text-xs text-muted">Local demo: run <code>npm run db:seed</code> and see README for development-only logins.</p>}
+        {/* Developer hint only in `next dev`; production builds never mention seeding or demo logins. */}
+        {!DEMO_MODE && process.env.NODE_ENV === "development" && <p className="mt-2 text-center text-xs text-muted">Development build: see the README for local demo data and logins.</p>}
       </div>
     </div>
   );

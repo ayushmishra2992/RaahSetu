@@ -1,10 +1,13 @@
 "use client";
 
+import { Plus } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, errorMessage } from "@/lib/api";
 import { fromLocalInput, toLocalInput } from "@/lib/format";
 import type { Driver, Location, Vehicle } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
+import { useAuth } from "./AuthProvider";
+import { NewLocationDialog } from "./LocationForm";
 import { Alert, Button, Field, Input, Select } from "./ui";
 
 /**
@@ -64,9 +67,12 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
     depotLocationId: vehicle?.depotLocationId?.toString() ?? "",
   });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const { can } = useAuth();
+  const [newDepot, setNewDepot] = useState(false);
   const unit = f.fuelType === "ELECTRIC" ? "km/kWh" : f.fuelType === "CNG" ? "km/kg" : "km/L";
 
   return (
+    <>
     <FormShell
       submitLabel={vehicle ? "Save changes" : "Add vehicle"}
       onSubmit={async () => {
@@ -117,6 +123,11 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
             {(locations.data ?? []).map((l) => (<option key={l.id} value={l.id}>{l.name} ({l.type.toLowerCase()})</option>))}
           </Select>
         </Field>
+        {can("locations:write") && (
+          <div className="sm:col-span-2 -mt-2">
+            <Button type="button" variant="ghost" size="sm" icon={Plus} onClick={() => setNewDepot(true)}>New depot location</Button>
+          </div>
+        )}
         {vehicle && (
           <Field label="Status" hint="ON_TRIP is managed by dispatch">
             <Select value={f.status} onChange={set("status")} disabled={vehicle.status === "ON_TRIP"}>
@@ -126,10 +137,35 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
         )}
       </div>
     </FormShell>
+    <NewLocationDialog
+      open={newDepot}
+      title="New depot location"
+      existing={locations.data ?? []}
+      defaultType="DEPOT"
+      onClose={() => setNewDepot(false)}
+      onCreated={(loc) => {
+        setF((s) => ({ ...s, depotLocationId: String(loc.id) }));
+        locations.reload();
+      }}
+    />
+    </>
   );
 }
 
+interface UserOption {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  driver: { id: number; name: string } | null;
+}
+
 export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () => void }) {
+  const { can } = useAuth();
+  // Only admins can list users (users:manage); others keep the numeric id field.
+  const users = useApi<UserOption[]>(can("users:manage") ? "/users" : null);
+  const linkable = (users.data ?? []).filter((u) => u.role === "DRIVER" && (!u.driver || u.driver.id === driver?.id));
   const [f, setF] = useState({
     name: driver?.name ?? "",
     phone: driver?.phone ?? "",
@@ -153,6 +189,9 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
           userId: f.userId ? Number(f.userId) : null,
         };
         if (driver && f.status !== driver.status) body.status = f.status;
+        if (f.licenseNumber.trim().length < 5) throw new Error("Licence number must be at least 5 characters.");
+        const shift = Number(f.maxShiftHours);
+        if (!(shift >= 1 && shift <= 16)) throw new Error("Max shift must be between 1 and 16 hours.");
         await api(driver ? `/drivers/${driver.id}` : "/drivers", { method: driver ? "PATCH" : "POST", body });
         onSaved();
       }}
@@ -163,9 +202,23 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
         <Field label="Licence number"><Input required value={f.licenseNumber} onChange={set("licenseNumber")} /></Field>
         <Field label="Licence expiry"><Input type="date" required value={f.licenseExpiry} onChange={set("licenseExpiry")} /></Field>
         <Field label="Max shift (hours)"><Input type="number" min={1} max={16} step="0.5" value={f.maxShiftHours} onChange={set("maxShiftHours")} /></Field>
-        <Field label="Linked app user id (optional)" hint="A user with the DRIVER role, so they can update their own trips">
-          <Input type="number" min={1} value={f.userId} onChange={set("userId")} />
-        </Field>
+        {users.data ? (
+          <Field label="App login" hint={linkable.length ? "A DRIVER user who can then update their own trips" : "No unlinked DRIVER users. Create one under Users first."}>
+            <Select value={f.userId} onChange={set("userId")}>
+              <option value="">Not linked</option>
+              {linkable.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} · {u.email}
+                  {u.isActive ? "" : " (deactivated)"}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Linked app user id (optional)" hint="Id of a DRIVER user (ask an admin), so they can update their own trips">
+            <Input type="number" min={1} value={f.userId} onChange={set("userId")} />
+          </Field>
+        )}
         {driver && (
           <Field label="Status">
             <Select value={f.status} onChange={set("status")} disabled={driver.status === "ON_TRIP"}>

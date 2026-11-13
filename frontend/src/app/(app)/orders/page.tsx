@@ -13,6 +13,7 @@ import {
   Drawer,
   ErrorState,
   LinkButton,
+  ListCard,
   Loading,
   Modal,
   PageHeader,
@@ -50,13 +51,17 @@ function OrdersInner() {
 
   const creating = write && params.get("new") === "1";
   const openId = params.get("open");
-  const setParam = (key: string, value: string | null) => {
+  /** Apply several query changes in one navigation (null removes a key). */
+  const setParams = (changes: Record<string, string | null>) => {
     const q = new URLSearchParams(params.toString());
-    if (value) q.set(key, value);
-    else q.delete(key);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) q.set(key, value);
+      else q.delete(key);
+    }
     const s = q.toString();
     router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
+  const setParam = (key: string, value: string | null) => setParams({ [key]: value });
 
   async function cancelOrder(o: Order) {
     try {
@@ -71,6 +76,19 @@ function OrdersInner() {
   const all = data ?? [];
   const count = (s: string) => all.filter((o) => o.status === s).length;
   const rows = all.filter((o) => (status === "all" || o.status === status) && (!priority || o.priority === priority));
+
+  /** Row actions; identical on the desktop table and the phone cards. */
+  const actions = (o: Order) =>
+    write && o.status === "PENDING" ? (
+      <>
+        <Button size="sm" variant="ghost" onClick={() => setEditing(o)} aria-label={`Edit ${o.orderNumber}`}>
+          Edit
+        </Button>
+        <ConfirmButton size="sm" confirmLabel="Cancel order" title="Cancel order?" description={`${o.orderNumber} for ${o.customerName} will no longer be planned. The record is kept for history.`} onConfirm={() => cancelOrder(o)}>
+          Cancel
+        </ConfirmButton>
+      </>
+    ) : null;
 
   const columns: Array<Column<Order>> = [
     {
@@ -103,19 +121,34 @@ function OrdersInner() {
     {
       key: "actions",
       header: <span className="sr-only">Actions</span>,
-      cell: (o) =>
-        write && o.status === "PENDING" ? (
-          <span className="flex justify-end gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setEditing(o)} aria-label={`Edit ${o.orderNumber}`}>
-              Edit
-            </Button>
-            <ConfirmButton size="sm" confirmLabel="Cancel order" title="Cancel order?" description={`${o.orderNumber} for ${o.customerName} will no longer be planned. The record is kept for history.`} onConfirm={() => cancelOrder(o)}>
-              Cancel
-            </ConfirmButton>
-          </span>
-        ) : null,
+      cell: (o) => (actions(o) ? <span className="flex justify-end gap-1">{actions(o)}</span> : null),
     },
   ];
+
+  const mobileCard = (o: Order) => (
+    <ListCard
+      title={
+        <button type="button" onClick={() => setParam("open", String(o.id))} className="text-left font-medium text-brand-700 hover:underline">
+          {o.orderNumber}
+        </button>
+      }
+      status={<StatusBadge status={o.status} />}
+      subtitle={o.customerName}
+      details={[
+        ["Route", `${o.pickupLocation?.name ?? "—"} → ${o.dropLocation?.name ?? "—"}`, true],
+        ["Weight", fmtNum(o.weightKg, "kg")],
+        ["Priority", <StatusBadge key="p" status={o.priority} />],
+        [
+          "Deliver by",
+          <span key="w" className={o.status === "PENDING" && isPast(o.windowEnd) ? "font-medium text-danger-700" : undefined}>
+            {o.windowEnd ? fmtDateTime(o.windowEnd) : "Any time"}
+            {o.status === "PENDING" && isPast(o.windowEnd) ? " · passed" : ""}
+          </span>,
+        ],
+      ]}
+      actions={actions(o)}
+    />
+  );
 
   return (
     <div>
@@ -169,8 +202,8 @@ function OrdersInner() {
               ))}
             </Select>
           }
-          initialSort={{ key: "order", dir: "desc" }}
           caption="Orders"
+          mobileCard={mobileCard}
           empty={{
             title: all.length ? "No orders match these filters" : "No orders yet",
             icon: Package,
@@ -184,10 +217,9 @@ function OrdersInner() {
         {creating && (
           <OrderForm
             onSaved={(id) => {
-              setParam("new", null);
+              setParams({ new: null, open: id ? String(id) : null });
               toast.success("Order created");
               reload();
-              if (id) setTimeout(() => setParam("open", String(id)), 0);
             }}
           />
         )}

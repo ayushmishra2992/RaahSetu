@@ -18,6 +18,7 @@ import greenfleetRoutes from "./modules/greenfleet/greenfleet.routes";
 import locationRoutes from "./modules/locations/locations.routes";
 import optirouteRoutes from "./modules/optiroute/optiroute.routes";
 import orderRoutes from "./modules/orders/orders.routes";
+import { createPlacesRouter } from "./modules/places/places.routes";
 import roadNetworkRoutes from "./modules/roadNetwork/roadNetwork.routes";
 import scenarioRoutes from "./modules/scenarios/scenarios.routes";
 import tripRoutes from "./modules/trips/trips.routes";
@@ -55,6 +56,7 @@ export function createApp() {
   api.use("/drivers", driverRoutes);
   api.use("/documents", documentRoutes);
   api.use("/locations", locationRoutes);
+  api.use("/places", createPlacesRouter());
   api.use("/road-network", roadNetworkRoutes);
   api.use("/orders", orderRoutes);
   api.use("/trips", tripRoutes);

@@ -157,7 +157,13 @@ export function Field({ label, hint, error, required, children, className }: { l
   }
   return (
     <div className={cx("block min-w-0 text-sm", className)}>
-      <label htmlFor={controlId}>{labelText}</label>
+      {/* The decorative asterisk stays outside <label> so the label text is exactly the field name. */}
+      <span className="mb-1.5 flex items-baseline gap-0.5">
+        <label htmlFor={controlId} className="text-[13px] font-medium text-ink">
+          {label}
+        </label>
+        {required && <span className="text-danger-600" aria-hidden>*</span>}
+      </span>
       <FieldContext.Provider value={{ id: controlId, describedBy: errorId ?? hintId, invalid: !!error }}>{cloneElement(only, { id: controlId })}</FieldContext.Provider>
       {messages}
     </div>

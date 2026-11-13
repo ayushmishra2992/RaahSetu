@@ -187,6 +187,65 @@ describe.skipIf(!enabled)("RaahSetu API (integration, real PostgreSQL)", () => {
       expect(opt.status).toBe(400);
     });
 
+    it("stores optional location-search details and keeps them per company", async () => {
+      const r = await request(app)
+        .post("/api/locations")
+        .set(auth(A))
+        .send({ name: "Bhiwandi Logistics Park", lat: 19.2813, lng: 73.0483, type: "WAREHOUSE", address: "Mankoli, Bhiwandi, Maharashtra 421302, India", city: "Bhiwandi", state: "Maharashtra", postalCode: "421302", country: "India", placeProvider: "locationiq", providerPlaceId: "321", coordsSource: "SEARCH" });
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({ city: "Bhiwandi", state: "Maharashtra", postalCode: "421302", country: "India", placeProvider: "locationiq", providerPlaceId: "321", coordsSource: "SEARCH" });
+
+      // Locations created without the new fields default to MANUAL with empty details.
+      const plain = await request(app).get("/api/locations").set(auth(A));
+      const depot = plain.body.find((l: { id: number }) => l.id === ids.depot);
+      expect(depot).toMatchObject({ coordsSource: "MANUAL", city: null, postalCode: null, placeProvider: null });
+
+      // Moving the pin: only the sent fields change.
+      const moved = await request(app).patch(`/api/locations/${r.body.id}`).set(auth(A)).send({ lat: 19.282, lng: 73.049, coordsSource: "PIN_ADJUSTED" });
+      expect(moved.status).toBe(200);
+      expect(moved.body).toMatchObject({ coordsSource: "PIN_ADJUSTED", city: "Bhiwandi", providerPlaceId: "321" });
+      // Blank text clears a field.
+      const cleared = await request(app).patch(`/api/locations/${r.body.id}`).set(auth(A)).send({ postalCode: "  " });
+      expect(cleared.body.postalCode).toBeNull();
+
+      expect((await request(app).post("/api/locations").set(auth(A)).send({ name: "Bad", lat: 19, lng: 73, coordsSource: "GPS" })).status).toBe(400);
+      expect((await request(app).post("/api/locations").set(auth(A)).send({ name: "Bad", lat: 19, lng: 73, placeProvider: "google" })).status).toBe(400);
+      expect((await request(app).post("/api/locations").set(auth(A)).send({ name: "Bad", lat: 19, lng: 73, postalCode: "x".repeat(13) })).status).toBe(400);
+
+      // Tenant isolation for the new fields.
+      expect((await request(app).patch(`/api/locations/${r.body.id}`).set(auth(B)).send({ city: "hacked" })).status).toBe(404);
+      const bList = await request(app).get("/api/locations").set(auth(B));
+      expect(bList.body.some((l: { providerPlaceId: string | null }) => l.providerPlaceId === "321")).toBe(false);
+      await request(app).delete(`/api/locations/${r.body.id}`).set(auth(A)).expect(204);
+    });
+
+    it("stores states and union territories under their canonical names", async () => {
+      const make = async (state: string) =>
+        (await request(app).post("/api/locations").set(auth(A)).send({ name: `State ${state}`, lat: 20, lng: 78, state, city: "Somewhere", postalCode: "110001" })).body;
+      expect((await make("NCT of Delhi")).state).toBe("Delhi");
+      expect((await make("orissa")).state).toBe("Odisha");
+      expect((await make("Jammu & Kashmir")).state).toBe("Jammu and Kashmir");
+      // Not a state/UT name: kept as typed (manual entries outside the list are allowed).
+      expect((await make("Some Province")).state).toBe("Some Province");
+      const loc = await make("maharashtra");
+      expect(loc.state).toBe("Maharashtra");
+      const patched = await request(app).patch(`/api/locations/${loc.id}`).set(auth(A)).send({ state: "Pondicherry", city: " Puducherry ", postalCode: "605001" });
+      expect(patched.body).toMatchObject({ state: "Puducherry", city: "Puducherry", postalCode: "605001" });
+      const list = await request(app).get("/api/locations").set(auth(A));
+      for (const l of list.body.filter((x: { name: string }) => x.name.startsWith("State "))) await request(app).delete(`/api/locations/${l.id}`).set(auth(A)).expect(204);
+    });
+
+    it("location search endpoints are protected and report when search is not configured", async () => {
+      // Tests run with PLACES_PROVIDER=none, so no provider is ever contacted.
+      const status = await request(app).get("/api/places/status").set(auth(viewer));
+      expect(status.body).toMatchObject({ enabled: false, reverse: false });
+      expect((await request(app).get("/api/places/reverse?lat=19&lng=73").set(auth(viewer))).status).toBe(403);
+      const reverse = await request(app).get("/api/places/reverse?lat=19&lng=73").set(auth(dispatcher));
+      expect(reverse.status).toBe(503);
+      expect(reverse.body.error.code).toBe("PLACES_DISABLED");
+      expect((await request(app).get("/api/places/reverse?lat=19&lng=73")).status).toBe(401);
+    });
+
     it("ignores a client-supplied companyId", async () => {
       const r = await request(app).post("/api/locations").set(auth(B)).send({ name: "B depot", lat: 12.9, lng: 77.5, type: "DEPOT", companyId: A.companyId });
       expect(r.status).toBe(201);

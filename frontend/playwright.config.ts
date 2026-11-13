@@ -4,7 +4,13 @@ import { defineConfig, devices } from "@playwright/test";
  * Smoke tests run against `next dev` with every /api/* call answered by
  * in-browser fixtures (e2e/fixtures), so no backend or database is needed.
  * An already-running dev server on :3000 is reused; set E2E_BASE_URL to test
- * another server instead (e.g. a production build via `next start`).
+ * another server instead (e.g. a production build via `next start`), and add
+ * E2E_PRODUCTION=1 for a production build to enable the bundle-size budget and
+ * the "no developer hints" check.
+ *
+ * Release run:
+ *   npx next build && npx next start -p 3100
+ *   E2E_BASE_URL=http://localhost:3100 E2E_PRODUCTION=1 npx playwright test
  *
  * Browser: Playwright's Chromium by default (`npx playwright install chromium`);
  * set PLAYWRIGHT_CHANNEL=msedge or chrome to use an installed browser instead.

@@ -103,7 +103,7 @@ export default function NewTripPage() {
             </Alert>
           )}
 
-          <fieldset aria-describedby={errors.orders ? "orders-error" : undefined}>
+          <fieldset className="min-w-0" aria-describedby={errors.orders ? "orders-error" : undefined}>
             <legend className="mb-2 flex w-full flex-wrap items-baseline justify-between gap-2 text-sm font-medium text-ink">
               <span className="flex items-center gap-1.5">
                 <Package size={15} aria-hidden className="text-navy-400" /> Pending orders ({selected.length} selected)

@@ -6,8 +6,19 @@ import { badRequest, conflict, notFound } from "../../lib/errors";
 import { authOf } from "../../lib/http";
 import { parseBody, parseId, parsePatch } from "../../lib/validate";
 import { requirePermission } from "../../middleware/auth";
+import { canonicalRegion } from "../places/india";
 
 const router = Router();
+
+function optionalText(max: number) {
+  return z
+    .string()
+    .trim()
+    .max(max)
+    .transform((v) => v || null)
+    .optional()
+    .nullable();
+}
 
 const LocationBody = z.object({
   name: z.string().trim().min(2).max(120),
@@ -16,6 +27,15 @@ const LocationBody = z.object({
   lat: z.coerce.number().min(-90).max(90),
   lng: z.coerce.number().min(-180).max(180),
   roadNodeId: z.coerce.number().int().positive().optional().nullable(),
+  // Optional details from location search (see modules/places). Blank strings are stored as NULL.
+  city: optionalText(100),
+  // Indian states/UTs are stored under their canonical name ("Orissa" → "Odisha", "NCT of Delhi" → "Delhi").
+  state: optionalText(100).transform((v) => (v ? (canonicalRegion(v) ?? v) : v)),
+  postalCode: optionalText(12),
+  country: optionalText(100),
+  placeProvider: z.enum(["locationiq", "geoapify"]).optional().nullable(),
+  providerPlaceId: optionalText(200),
+  coordsSource: z.enum(["MANUAL", "SEARCH", "PIN_ADJUSTED"]).optional(),
 });
 
 async function assertNode(companyId: number, roadNodeId?: number | null) {

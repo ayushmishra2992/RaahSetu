@@ -8,7 +8,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: { default: "RaahSetu 2.0", template: "%s · RaahSetu" },
+  title: { default: "RaahSetu", template: "%s · RaahSetu" },
   description: "Fleet operations, constrained route optimization, GreenFleet estimates and dispatch control tower.",
 };
 

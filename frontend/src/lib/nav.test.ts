@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breadcrumbsFor, isActive, NAV, visibleNav } from "./nav";
+import { breadcrumbsFor, isActive, NAV, requiredPermission, visibleNav } from "./nav";
 
 const allow = (perms: string[]) => (p: string) => perms.includes(p);
 
@@ -43,5 +43,22 @@ describe("navigation", () => {
     expect(breadcrumbsFor("/optiroute/runs/42").at(-1)).toEqual({ label: "Run #42" });
     expect(breadcrumbsFor("/billing/3").map((c) => c.label)).toEqual(["Business", "Invoices & Challans", "Document"]);
     expect(breadcrumbsFor("/unknown")).toEqual([{ label: "RaahSetu" }]);
+  });
+});
+
+describe("requiredPermission", () => {
+  it("uses the nav item's permission for the page and its sub-pages", () => {
+    expect(requiredPermission("/billing")).toBe("billing:read");
+    expect(requiredPermission("/billing/7")).toBe("billing:read");
+    expect(requiredPermission("/users")).toBe("users:manage");
+    expect(requiredPermission("/optiroute/runs/3")).toBe("optimize:read");
+  });
+  it("needs write access for manual trip creation", () => {
+    expect(requiredPermission("/trips/new")).toBe("trips:write");
+    expect(requiredPermission("/trips/5")).toBe("trips:read");
+  });
+  it("leaves settings and unknown paths open to any signed-in user", () => {
+    expect(requiredPermission("/settings")).toBeUndefined();
+    expect(requiredPermission("/design-system")).toBeUndefined();
   });
 });

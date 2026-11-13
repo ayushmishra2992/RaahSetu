@@ -68,6 +68,16 @@ enum LocationType {
   OTHER
 }
 
+/// How a location's coordinates were obtained.
+enum CoordSource {
+  /// Typed in or pinned on the map without a search (all locations created before location search)
+  MANUAL
+  /// Taken unchanged from a location-search result
+  SEARCH
+  /// Taken from a search result, then the map pin was moved
+  PIN_ADJUSTED
+}
+
 enum OrderPriority {
   LOW
   NORMAL
@@ -287,6 +297,18 @@ model Location {
   lng        Float
   roadNodeId Int?
   roadNode   RoadNode?    @relation(fields: [roadNodeId], references: [id], onDelete: SetNull)
+
+  /// Address parts and provenance from location search (all optional).
+  city            String?
+  state           String?
+  /// Indian PIN code (6 digits) or other postal code, kept as text
+  postalCode      String?
+  country         String?
+  /// Location-search provider that supplied the place, e.g. "locationiq"
+  placeProvider   String?
+  /// That provider's opaque place id (not unique; providers may reuse or change ids)
+  providerPlaceId String?
+  coordsSource    CoordSource  @default(MANUAL)
 
   vehiclesAtDepot Vehicle[]  @relation("VehicleDepot")
   pickupOrders    Order[]    @relation("OrderPickup")

@@ -103,7 +103,7 @@ export default function VehicleDetailPage() {
             ))}
           </Table>
         </Card>
-        <Card title="Fuel log" icon={Fuel} description="Measured fills you recorded" actions={can("fuel:write") && <Link href="/greenfleet#log-fuel" className="text-xs font-medium text-brand-700 hover:underline">Log fuel</Link>}>
+        <Card title="Fuel log" icon={Fuel} description="Measured fills you recorded" actions={can("fuel:write") && <Link href="/greenfleet?tab=fuel" className="text-xs font-medium text-brand-700 hover:underline">Log fuel</Link>}>
           <Table head={["Date", "Quantity", "Cost", "Odometer"]} empty={v.fuelRecords.length === 0} emptyMessage="No fills logged." caption="Fuel log">
             {v.fuelRecords.map((r) => (
               <tr key={r.id}>

@@ -16,6 +16,11 @@ export default defineConfig({
       UPLOAD_DIR: "./.test-uploads",
       AUTH_RATE_LIMIT_PER_15_MIN: "1000",
       PUBLIC_APP_URL: "http://localhost:3000",
+      // Tests never call a real location-search provider, even if backend/.env configures one.
+      PLACES_PROVIDER: "none",
+      PLACES_API_KEY: "",
+      PLACES_FALLBACK_PROVIDER: "none",
+      PLACES_FALLBACK_API_KEY: "",
     },
     projects: [
       {

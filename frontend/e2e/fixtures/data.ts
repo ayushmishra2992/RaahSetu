@@ -223,3 +223,19 @@ export const driverDetail = { ...drivers[0], documents: [], trips: trips.filter(
 
 /** 1×1 PNG used for QR codes in fixtures. */
 export const TINY_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+/** Location-search fixtures (the real provider is never called in tests). */
+export const placesStatus = { enabled: true, provider: "locationiq", fallback: "geoapify", reverse: true, attribution: [{ text: "Test search data", url: "https://example.test/attribution" }], minQueryLength: 3 };
+export const placeSuggestions = [
+  { providerPlaceId: "p-1", name: "Bhiwandi Logistics Park", address: "Bhiwandi Logistics Park, Mankoli, Bhiwandi, Thane, Maharashtra, 421302, India", city: "Bhiwandi", state: "Maharashtra", postalCode: "421302", country: "India", lat: 19.2813, lng: 73.0483 },
+  { providerPlaceId: "p-2", name: "Bhiwandi Bypass Warehouse 7", address: "Warehouse 7, Bhiwandi Bypass, Bhiwandi, Maharashtra, 421302, India", city: "Bhiwandi", state: "Maharashtra", postalCode: "421302", country: "India", lat: 19.2741, lng: 73.0612 },
+  { providerPlaceId: "p-3", name: "Andheri East Cold Store", address: "Andheri East Cold Store, Marol, Andheri East, Mumbai, Maharashtra, 400059, India", city: "Mumbai", state: "Maharashtra", postalCode: "400059", country: "India", lat: 19.1136, lng: 72.8697 },
+];
+
+/** Reverse lookup fixture: the matched address point is 22 m north of the pin (never moves the pin). */
+export const reverseFor = (lat: number, lng: number) => ({
+  provider: "locationiq",
+  attribution: placesStatus.attribution,
+  place: { providerPlaceId: "rev-1", name: "Mankoli Naka", address: "Mankoli Naka, Anjur Phata Road, Bhiwandi, Thane, Maharashtra, 421302, India", city: "Bhiwandi", state: "Maharashtra", postalCode: "421302", country: "India", lat: lat + 0.0002, lng },
+  distanceM: 22,
+});

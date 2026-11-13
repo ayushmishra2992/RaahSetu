@@ -88,3 +88,30 @@ test.describe("role restrictions", () => {
     });
   });
 });
+
+test.describe("page access by role", () => {
+  for (const role of ROLES) {
+    test.describe(role, () => {
+      test.use({ role });
+      test("permitted pages render; others show 'no access' without calling their API", async ({ page, api }) => {
+        test.setTimeout(120_000);
+        const perms = new Set<string>(permissionsFor(role));
+        const pages = [...NAV.flatMap((g) => g.items.map((i) => ({ href: i.href, permission: i.permission }))), { href: "/trips/new", permission: "trips:write" }];
+        for (const p of pages) {
+          const before = api.requests.length;
+          await page.goto(p.href);
+          const allowed = !p.permission || perms.has(p.permission);
+          if (allowed) {
+            await expect(page.locator("main h1").first(), `${role} ${p.href}`).toBeVisible();
+            await expect(page.getByText("You don’t have access to this page")).toHaveCount(0);
+          } else {
+            await expect(page.getByText("You don’t have access to this page"), `${role} ${p.href}`).toBeVisible();
+            const resource = `/api${p.href === "/dashboard" ? "/control-tower" : p.href}`;
+            const leaked = api.requests.slice(before).filter((r) => r.path.startsWith(resource));
+            expect(leaked, `${role} ${p.href} must not request ${resource}`).toEqual([]);
+          }
+        }
+      });
+    });
+  }
+});

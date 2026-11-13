@@ -6,6 +6,9 @@ const num = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
 export const fmtDateTime = (v?: string | Date | null) => (v ? dateTime.format(new Date(v)) : "—");
 export const fmtDate = (v?: string | Date | null) => (v ? dateOnly.format(new Date(v)) : "—");
 export const fmtMoney = (v?: number | null) => (v == null ? "—" : inr.format(v));
+const inrExact = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Exact rupees and paise, for invoices and challans. */
+export const fmtAmount = (v?: number | null) => (v == null ? "—" : inrExact.format(v));
 export const fmtNum = (v?: number | null, unit?: string) => (v == null ? "—" : `${num.format(v)}${unit ? ` ${unit}` : ""}`);
 export const fmtMinutes = (m?: number | null) => {
   if (m == null) return "—";

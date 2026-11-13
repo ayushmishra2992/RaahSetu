@@ -79,6 +79,20 @@ export function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** Pages that need more than their nav item's read permission. */
+const EXTRA_PERMISSIONS: Array<[RegExp, string]> = [[/^\/trips\/new$/, "trips:write"]];
+
+/**
+ * Permission needed to open a path, from the same table as the sidebar.
+ * The API enforces permissions on every request; this only lets the UI show a
+ * clear "no access" page instead of a page that fails to load.
+ */
+export function requiredPermission(pathname: string): string | undefined {
+  for (const [re, permission] of EXTRA_PERMISSIONS) if (re.test(pathname)) return permission;
+  for (const g of NAV) for (const i of g.items) if (isActive(pathname, i.href)) return i.permission;
+  return undefined;
+}
+
 export interface Crumb {
   label: string;
   href?: string;

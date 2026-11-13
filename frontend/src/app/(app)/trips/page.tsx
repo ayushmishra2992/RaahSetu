@@ -4,7 +4,7 @@ import { Navigation, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { DataTable, ErrorState, LinkButton, PageHeader, StatusBadge, TableSkeleton, Tabs, type Column } from "@/components/ds";
+import { DataTable, ErrorState, LinkButton, ListCard, PageHeader, StatusBadge, TableSkeleton, Tabs, type Column } from "@/components/ds";
 import { fmtDateTime, fmtMoney, fmtNum, humanize } from "@/lib/format";
 import type { Trip } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
@@ -79,6 +79,19 @@ export default function TripsPage() {
           searchPlaceholder="Search trip, vehicle or driver…"
           initialSort={{ key: "start", dir: "desc" }}
           caption="Trips"
+          mobileCard={(t) => (
+            <ListCard
+              title={<Link href={`/trips/${t.id}`} className="font-medium text-brand-700 hover:underline">{t.tripNumber}</Link>}
+              status={<StatusBadge status={t.status} />}
+              subtitle={`${t.vehicle.registrationNumber} · ${t.driver.name}`}
+              details={[
+                ["Planned start", fmtDateTime(t.plannedStart)],
+                ["Stops", t._count?.stops ?? "—"],
+                ["Distance", fmtNum(t.plannedDistanceKm, "km")],
+                ["Est. cost", fmtMoney(t.estCost)],
+              ]}
+            />
+          )}
           empty={{
             title: all.length ? "No trips with this status" : isDriver ? "No trips assigned to you" : "No trips yet",
             icon: Navigation,

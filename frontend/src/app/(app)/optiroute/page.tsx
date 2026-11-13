@@ -16,6 +16,7 @@ import {
   Field,
   Input,
   LinkButton,
+  ListCard,
   Loading,
   Meter,
   PageHeader,
@@ -224,7 +225,7 @@ function Planner() {
         </Step>
 
         <Step n={3} title="Constraints & objective" icon={SlidersHorizontal}>
-          <fieldset>
+          <fieldset className="min-w-0">
             <legend className="mb-2 text-sm font-medium text-ink">Algorithm</legend>
             <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
               {meta.data.algorithms.map((a) => (
@@ -418,6 +419,20 @@ function History({ runs }: { runs: ReturnType<typeof useApi<RunSummary[]>> }) {
         searchPlaceholder="Search runs…"
         initialSort={{ key: "run", dir: "desc" }}
         caption="OptiRoute run history"
+        mobileCard={(r) => (
+          <ListCard
+            title={<Link href={`/optiroute/runs/${r.id}`} className="font-medium text-brand-700 hover:underline">#{r.id} {r.name ?? humanize(r.algorithm)}</Link>}
+            status={r.feasible ? <Badge color="green" dot>Feasible</Badge> : <Badge color="red" dot>Infeasible</Badge>}
+            subtitle={`${humanize(r.algorithm)} · ${fmtDateTime(r.createdAt)}`}
+            details={[
+              ["Unserved", r.unservedCount],
+              ["Distance", fmtNum(r.totalDistanceKm, "km")],
+              ["Est. cost", fmtMoney(r.totalCost)],
+              ["Trips", r.dispatchedAt ? "Created" : "Not yet"],
+            ]}
+            actions={columns[0].cell(r)}
+          />
+        )}
         toolbar={
           <div className="flex items-center gap-2 sm:ml-auto">
             <span className="text-xs text-muted">{compare.length}/2 selected</span>

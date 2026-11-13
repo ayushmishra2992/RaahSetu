@@ -44,7 +44,7 @@ const PLACEHOLDER_TILE = solidPng([233, 238, 236]);
 
 const byStatus = <T extends { status: string }>(rows: T[], q: URLSearchParams) => (q.get("status") ? rows.filter((r) => r.status === q.get("status")) : rows);
 
-function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Role): { status?: number; body?: unknown } | undefined {
+function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Role, body?: unknown): { status?: number; body?: unknown } | undefined {
   if (method === "GET") {
     const id = Number(path.split("/").pop());
     const table: Record<string, () => unknown> = {
@@ -72,13 +72,22 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
       "/api/audit": () => F.auditEvents,
       "/api/greenfleet/summary": () => F.greenSummary,
       "/api/fuel-records": () => F.fuelRecords,
+      "/api/places/status": () => F.placesStatus,
+      "/api/places/reverse": () => F.reverseFor(Number(q.get("lat")), Number(q.get("lng"))),
+      "/api/places/autocomplete": () => {
+        const words = (q.get("q") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+        return { provider: F.placesStatus.provider, attribution: F.placesStatus.attribution, results: F.placeSuggestions.filter((s) => words.every((w) => `${s.name} ${s.address}`.toLowerCase().includes(w))) };
+      },
     };
     if (table[path]) return { body: table[path]() };
+    if (path === "/api/road-network/path")
+      return { body: { found: true, distanceKm: 37, minutes: 49, nodeIds: [1, 2, 3, 4], edgeIds: [1, 2, 3], nodeNames: ["Bhiwandi Jn", "Thane Jn", "Airoli Jn", "Vashi Jn"], comparison: { astar: { expandedNodes: 4, runtimeMs: 0.12 }, dijkstra: { expandedNodes: 6, runtimeMs: 0.2 } } } };
     if (/^\/api\/trips\/\d+\/qr$/.test(path) || /^\/api\/billing\/\d+\/qr$/.test(path)) return { body: { url: "http://localhost:3000/verify/fixture-token", dataUrl: F.TINY_PNG } };
     if (/^\/api\/trips\/\d+$/.test(path)) return { body: { ...F.trip, id } };
     if (/^\/api\/optiroute\/runs\/\d+$/.test(path)) return { body: { ...F.run, id } };
     if (/^\/api\/orders\/\d+$/.test(path)) {
-      const o = F.orders.find((x) => x.id === id);
+      // id 99 is the order the POST /api/orders fixture "creates".
+      const o = id === 99 ? { ...F.orders[3], id: 99 } : F.orders.find((x) => x.id === id);
       return o ? { body: { ...o, tripStops: id <= 3 ? [{ id: 10 + id, type: "PICKUP", trip: { id: 1, tripNumber: "TRP-QA0001", status: "IN_TRANSIT" } }] : [] } } : { status: 404, body: { error: { message: "Order not found" } } };
     }
     if (/^\/api\/vehicles\/\d+$/.test(path)) return { body: F.vehicleDetail };
@@ -89,7 +98,15 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
   }
   if (path === "/api/auth/login") return { body: { user: F.meFor(role).user } };
   if (path === "/api/auth/logout") return { status: 204 };
+  if (method === "POST" && path === "/api/locations") return { status: 201, body: { id: 50, roadNodeId: null, roadNode: null, ...(typeof body === "object" && body ? body : {}) } };
   if (method === "POST" && path === "/api/orders") return { status: 201, body: { ...F.orders[3], id: 99 } };
+  if (method === "POST" && path === "/api/greenfleet/estimate")
+    return {
+      body: {
+        rows: F.vehicles.map((v, i) => ({ vehicleId: v.id, registrationNumber: v.registrationNumber, fuelType: v.fuelType, capacityKg: v.capacityKg, canCarry: v.capacityKg >= 1000, durationMin: 180, fuelUnits: 10 + i, fuelUnit: v.fuelType === "ELECTRIC" ? "kWh" : v.fuelType === "CNG" ? "kg" : "L", fuelCost: 900 + i * 50, driverCost: 450, operatingCost: 1350 + i * 50, co2Kg: 20 + i * 3, co2PerTonneKm: 0.15 })),
+        assumptions: [],
+      },
+    };
   // Generic success for other mutations; tests assert on the recorded request.
   return { body: { ok: true, id: 1, trips: [] } };
 }
@@ -116,7 +133,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     let res: { status?: number; body?: unknown } | undefined;
     if (override !== undefined) res = typeof override === "function" ? (override as (r: RecordedRequest) => { status?: number; body?: unknown })(rec) : { body: override };
     else if (role === null && rec.path === "/api/auth/me") res = { status: 401, body: { error: { message: "Not signed in" } } };
-    else if (role !== null) res = fixtureFor(rec.method, rec.path, url.searchParams, role);
+    else if (role !== null) res = fixtureFor(rec.method, rec.path, url.searchParams, role, rec.body);
     if (!res) {
       unmocked.push(key);
       res = { status: 404, body: { error: { message: `Unmocked ${key}` } } };

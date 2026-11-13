@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Logo } from "@/components/shell/Logo";
 
 const modules = [
   ["Fleet & compliance", "Vehicles, drivers, RC/insurance/PUC/fitness/permit tracking with expiry alerts and private document storage."],
@@ -12,17 +13,17 @@ const modules = [
 export default function Landing() {
   return (
     <div className="min-h-screen bg-white">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-        <div className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-md bg-brand-600 text-sm font-bold text-white">RS</span>
-          <span className="text-lg font-semibold tracking-tight">RaahSetu 2.0</span>
-        </div>
-        <nav className="flex gap-2 text-sm">
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
+        <span className="shrink-0">
+          <Logo tone="light" size="lg" />
+        </span>
+        <nav className="flex gap-2 whitespace-nowrap text-sm">
           <Link href="/login" className="rounded-md px-3 py-2 font-medium text-brand-700 hover:bg-brand-50">
             Log in
           </Link>
-          <Link href="/register" className="rounded-md bg-brand-600 px-3 py-2 font-medium text-white hover:bg-brand-700">
-            Register your company
+          <Link href="/register" aria-label="Register your company" className="rounded-md bg-brand-600 px-3 py-2 font-medium text-white hover:bg-brand-700">
+            <span className="sm:hidden">Register</span>
+            <span className="hidden sm:inline">Register your company</span>
           </Link>
         </nav>
       </header>

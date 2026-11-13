@@ -80,7 +80,7 @@ test.describe("manual dispatch", () => {
   test("requires a vehicle, driver and orders", async ({ page, api }) => {
     await page.goto("/trips/new");
     await page.getByRole("button", { name: "Create trip" }).click();
-    await expect(page.getByRole("alert")).toContainText("Fix 3 highlighted items");
+    await expect(page.getByRole("alert").filter({ hasText: "Couldn't save" })).toContainText("Fix 3 highlighted items");
     expect(calls(api, "POST", "/api/trips")).toHaveLength(0);
   });
 
@@ -93,8 +93,40 @@ test.describe("manual dispatch", () => {
       await page.getByRole("checkbox").first().check();
       await expect(page.getByRole("meter")).toBeVisible();
       await page.getByRole("button", { name: "Create trip" }).click();
-      await expect(page.getByRole("alert")).toContainText("ORD-QA0004: delivery window cannot be met");
+      await expect(page.getByRole("alert").filter({ hasText: "Couldn't save" })).toContainText("ORD-QA0004: delivery window cannot be met");
       expect((calls(api, "POST", "/api/trips")[0].body as { orderIds: number[] }).orderIds).toEqual([4]);
     });
   });
+});
+
+test.describe("phone layout", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("orders become cards with the same actions", async ({ page, api }) => {
+    await page.goto("/orders");
+    await expect(page.getByRole("table", { name: "Orders" })).toBeHidden();
+    const list = page.getByRole("list", { name: "Orders" });
+    await expect(list.getByRole("listitem")).toHaveCount(6);
+    const card = list.getByRole("listitem").filter({ hasText: "ORD-QA0004" });
+    await expect(card).toContainText("Andheri Retail Pvt Ltd");
+    await expect(card).toContainText("Pending");
+    // Orders that aren't pending offer no actions, as on desktop.
+    await expect(list.getByRole("listitem").filter({ hasText: "ORD-QA0001" }).getByRole("button", { name: "Cancel" })).toHaveCount(0);
+    await card.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("dialog", { name: "Cancel order?" }).getByRole("button", { name: "Cancel order" }).click();
+    await expect.poll(() => calls(api, "POST", "/api/orders/4/cancel").length).toBe(1);
+  });
+
+  for (const [path, list, first] of [
+    ["/trips", "Trips", "TRP-QA0001"],
+    ["/vehicles", "Vehicles", "MH04QA1001"],
+    ["/drivers", "Drivers", "QA Driver One"],
+    ["/documents", "Compliance documents", "PUC"],
+  ] as const) {
+    test(`${path} uses cards on phones`, async ({ page }) => {
+      await page.goto(path);
+      await expect(page.getByRole("list", { name: list })).toContainText(first);
+      await expect(page.getByRole("table", { name: list })).toBeHidden();
+    });
+  }
 });

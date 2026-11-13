@@ -1,3 +1,5 @@
+> **Historical record.** The current verification results (13 Nov 2026) and how to run every suite are in [TESTING.md](TESTING.md). The record below is from an earlier version of the project and its counts are out of date.
+
 # Verification status
 
 Verified on 21–22 Oct 2026 in a Linux sandbox (Node 22.22, npm 10.9, PostgreSQL 16.15) from a **fresh `git clone`** of this repository, installing strictly from the committed lockfiles with `npm run setup:ci`, against newly created empty databases.

@@ -36,6 +36,14 @@ export interface Location {
   lng: number;
   roadNodeId: number | null;
   roadNode?: { id: number; name: string } | null;
+  /** Location-search details (optional; older API responses omit them). */
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  placeProvider?: string | null;
+  providerPlaceId?: string | null;
+  coordsSource?: "MANUAL" | "SEARCH" | "PIN_ADJUSTED";
 }
 
 export interface Vehicle {

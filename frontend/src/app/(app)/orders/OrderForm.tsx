@@ -1,8 +1,11 @@
 "use client";
 
+import { Plus } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 import { DateTimeInput, FormShell } from "@/components/forms";
-import { Alert, Field, Input, Select, Textarea } from "@/components/ds";
+import { Alert, Button, Field, Input, Select, Textarea } from "@/components/ds";
+import { NewLocationDialog } from "@/components/LocationForm";
 import { api } from "@/lib/api";
 import type { Location, Order } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
@@ -36,8 +39,19 @@ export function OrderForm({ order, onSaved }: { order?: Order; onSaved: (id: num
   };
   const text = (k: keyof OrderDraft) => (e: { target: { value: string } }) => set(k, e.target.value);
   const locs = locations.data ?? [];
+  const { can } = useAuth();
+  const canAddLocation = can("locations:write");
+  // Which field the "New location" dialog fills in when it saves.
+  const [newFor, setNewFor] = useState<"pickupLocationId" | "dropLocationId" | null>(null);
+  const newLocationButton = (k: "pickupLocationId" | "dropLocationId") =>
+    canAddLocation && (
+      <Button type="button" variant="ghost" size="sm" icon={Plus} className="mt-1" onClick={() => setNewFor(k)}>
+        {k === "pickupLocationId" ? "New pickup location" : "New drop location"}
+      </Button>
+    );
 
   return (
+    <>
     <FormShell
       submitLabel={order ? "Save changes" : "Create order"}
       onSubmit={async () => {
@@ -49,34 +63,39 @@ export function OrderForm({ order, onSaved }: { order?: Order; onSaved: (id: num
         onSaved(saved?.id ?? order?.id ?? 0);
       }}
     >
-      {!locations.loading && locs.length < 2 && <Alert kind="warning">Add at least two locations first (Locations &amp; Roads).</Alert>}
-      <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <legend className="sr-only">Customer</legend>
+      {!locations.loading && locs.length < 2 && <Alert kind="warning">{canAddLocation ? "Fewer than two locations exist yet. Use “New pickup location” / “New drop location” below to add them." : "Add at least two locations first (Locations & Roads)."}</Alert>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Customer" required error={errors.customerName}>
           <Input required value={f.customerName} onChange={text("customerName")} autoComplete="organization" />
         </Field>
         <Field label="Customer phone" error={errors.customerPhone}>
           <Input type="tel" value={f.customerPhone} onChange={text("customerPhone")} placeholder="+91 98xxxxxxxx" />
         </Field>
-      </fieldset>
-      <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      </div>
+      <fieldset className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <legend className="mb-1 text-sm font-medium text-ink">Route and load</legend>
-        <Field label="Pickup" required error={errors.pickupLocationId}>
-          <Select required value={f.pickupLocationId} onChange={text("pickupLocationId")}>
-            <option value="">Select…</option>
-            {locs.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Drop" required error={errors.dropLocationId}>
-          <Select required value={f.dropLocationId} onChange={text("dropLocationId")}>
-            <option value="">Select…</option>
-            {locs.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </Select>
-        </Field>
+        <div className="min-w-0">
+          <Field label="Pickup" required error={errors.pickupLocationId}>
+            <Select required value={f.pickupLocationId} onChange={text("pickupLocationId")}>
+              <option value="">Select…</option>
+              {locs.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </Select>
+          </Field>
+          {newLocationButton("pickupLocationId")}
+        </div>
+        <div className="min-w-0">
+          <Field label="Drop" required error={errors.dropLocationId}>
+            <Select required value={f.dropLocationId} onChange={text("dropLocationId")}>
+              <option value="">Select…</option>
+              {locs.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </Select>
+          </Field>
+          {newLocationButton("dropLocationId")}
+        </div>
         <Field label="Weight (kg)" required error={errors.weightKg}>
           <Input type="number" min={1} max={100000} step={1} required value={f.weightKg} onChange={text("weightKg")} />
         </Field>
@@ -88,7 +107,7 @@ export function OrderForm({ order, onSaved }: { order?: Order; onSaved: (id: num
           </Select>
         </Field>
       </fieldset>
-      <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <fieldset className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <legend className="mb-1 text-sm font-medium text-ink">Schedule</legend>
         <Field label="Goods ready at" hint="Optional">
           <DateTimeInput value={f.readyAt} onChange={(v) => set("readyAt", v)} />
@@ -114,5 +133,16 @@ export function OrderForm({ order, onSaved }: { order?: Order; onSaved: (id: num
         </div>
       </div>
     </FormShell>
+    <NewLocationDialog
+      open={newFor !== null}
+      title={newFor === "dropLocationId" ? "New drop location" : "New pickup location"}
+      existing={locs}
+      onClose={() => setNewFor(null)}
+      onCreated={(loc) => {
+        if (newFor) set(newFor, String(loc.id));
+        locations.reload();
+      }}
+    />
+    </>
   );
 }

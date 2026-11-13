@@ -87,7 +87,7 @@ const thCls = "whitespace-nowrap px-3 py-2.5 text-left text-[12px] font-medium t
 
 export function Table({ head, children, empty, emptyMessage = "Nothing here yet.", caption }: { head: ReactNode[]; children: ReactNode; empty?: boolean; emptyMessage?: ReactNode; caption?: string }) {
   return (
-    <div className="rs-table overflow-x-auto rounded-lg border border-line bg-surface shadow-xs">
+    <div className="rs-table relative overflow-x-auto rounded-lg border border-line bg-surface shadow-xs">
       <table className="w-full border-collapse text-left text-sm">
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead className="border-b border-line bg-surface-muted">
@@ -142,6 +142,7 @@ export function DataTable<T>({
   initialSort,
   empty,
   caption,
+  mobileCard,
 }: {
   rows: T[];
   columns: Array<Column<T>>;
@@ -155,6 +156,11 @@ export function DataTable<T>({
   initialSort?: { key: string; dir: "asc" | "desc" };
   empty?: { title: string; description?: ReactNode; icon?: LucideIcon; action?: ReactNode };
   caption?: string;
+  /**
+   * Card renderer for phones (< 768px). When given, phones get a card list
+   * instead of a horizontally scrolling table; wider screens keep the table.
+   */
+  mobileCard?: (row: T) => ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState(initialSort ?? null);
@@ -210,7 +216,23 @@ export function DataTable<T>({
           {empty.description}
         </EmptyState>
       ) : (
-        <div className="rs-table overflow-x-auto rounded-lg border border-line bg-surface shadow-xs">
+        <>
+        {mobileCard && (
+          <div className="md:hidden">
+            <ul aria-label={caption} className="space-y-2">
+              {visible.map((r) => (
+                <li key={rowKey(r)}>{mobileCard(r)}</li>
+              ))}
+            </ul>
+            {filtered.length === 0 && <p className="rounded-lg border border-line bg-surface px-4 py-8 text-center text-sm text-muted">No results match “{query}”.</p>}
+            {filtered.length > pageSize && (
+              <div className="mt-2 rounded-lg border border-line bg-surface">
+                <Pagination page={current} pages={pages} total={filtered.length} pageSize={pageSize} onPage={setPage} />
+              </div>
+            )}
+          </div>
+        )}
+        <div className={cx("rs-table relative overflow-x-auto rounded-lg border border-line bg-surface shadow-xs", mobileCard && "max-md:hidden")}>
           <table className="w-full border-collapse text-left text-sm">
             {caption && <caption className="sr-only">{caption}</caption>}
             <thead className="border-b border-line bg-surface-muted">
@@ -252,6 +274,7 @@ export function DataTable<T>({
           {filtered.length === 0 && <p className="px-4 py-10 text-center text-sm text-muted">No results match “{query}”.</p>}
           {filtered.length > pageSize && <Pagination page={current} pages={pages} total={filtered.length} pageSize={pageSize} onPage={setPage} />}
         </div>
+        </>
       )}
     </div>
   );
@@ -273,6 +296,32 @@ export function Pagination({ page, pages, total, pageSize, onPage }: { page: num
         <IconButton icon={ChevronRight} label="Next page" size="sm" disabled={page >= pages - 1} onClick={() => onPage(page + 1)} />
       </div>
     </nav>
+  );
+}
+
+/* ─── ListCard: one record as a card (mobile lists) ─────────────────────── */
+
+/** Compact record card used for phone layouts: title + status, details, actions. */
+export function ListCard({ title, status, subtitle, details, actions }: { title: ReactNode; status?: ReactNode; subtitle?: ReactNode; details?: Array<[label: string, value: ReactNode, wide?: boolean]>; actions?: ReactNode }) {
+  return (
+    <article className="rounded-lg border border-line bg-surface px-4 py-3 shadow-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 text-sm font-medium text-ink">{title}</div>
+        {status && <div className="flex shrink-0 flex-wrap justify-end gap-1">{status}</div>}
+      </div>
+      {subtitle && <div className="mt-0.5 truncate text-[13px] text-muted">{subtitle}</div>}
+      {details && details.length > 0 && (
+        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+          {details.map(([k, v, wide]) => (
+            <div key={k} className={cx("min-w-0", wide && "col-span-2")}>
+              <dt className="text-subtle">{k}</dt>
+              <dd className={cx("text-ink", wide ? "break-words" : "truncate")}>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {actions && <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-line pt-2.5">{actions}</div>}
+    </article>
   );
 }
 

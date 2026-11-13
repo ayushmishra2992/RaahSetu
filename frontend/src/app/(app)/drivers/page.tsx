@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { DriverForm } from "@/components/forms";
-import { Button, Card, DataTable, ErrorState, Modal, PageHeader, StackedBar, StatusBadge, TableSkeleton, Tabs, statusSegments, useToast, type Column } from "@/components/ds";
+import { Button, Card, DataTable, ErrorState, ListCard, Modal, PageHeader, StackedBar, StatusBadge, TableSkeleton, Tabs, statusSegments, useToast, type Column } from "@/components/ds";
 import { daysUntil, expiryStateOf, fmtDate, fmtRelDays, humanize } from "@/lib/format";
 import type { Driver } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
@@ -92,6 +92,27 @@ export default function DriversPage() {
           searchPlaceholder="Search name, phone, licence…"
           initialSort={{ key: "name", dir: "asc" }}
           caption="Drivers"
+          mobileCard={(d) => {
+            const st = licence(d);
+            return (
+              <ListCard
+                title={<Link href={`/drivers/${d.id}`} className="font-medium text-brand-700 hover:underline">{d.name}</Link>}
+                status={
+                  <>
+                    <StatusBadge status={d.status} />
+                    {st !== "VALID" && <StatusBadge status={st} label={st === "EXPIRED" ? "Licence expired" : "Licence due"} />}
+                  </>
+                }
+                subtitle={d.phone}
+                details={[
+                  ["Licence expiry", `${fmtDate(d.licenseExpiry)}${st !== "VALID" ? ` · ${fmtRelDays(daysUntil(d.licenseExpiry))}` : ""}`],
+                  ["Shift limit", `${d.maxShiftHours} h`],
+                  ["Licence", d.licenseNumber],
+                  ["App login", d.user?.email ?? "Not linked"],
+                ]}
+              />
+            );
+          }}
           empty={{ title: all.length ? "No drivers with this status" : "No drivers yet", icon: IdCard, description: all.length ? undefined : "Add drivers so OptiRoute can pair them with vehicles." }}
         />
       )}

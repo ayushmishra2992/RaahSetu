@@ -3,7 +3,8 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Drawer } from "@/components/ds/Overlay";
-import { breadcrumbsFor, visibleNav } from "@/lib/nav";
+import { breadcrumbsFor, requiredPermission, visibleNav } from "@/lib/nav";
+import { NoAccess } from "./shell/NoAccess";
 import { useAuth } from "./AuthProvider";
 import { Logo } from "./shell/Logo";
 import { NavList, Sidebar } from "./shell/Sidebar";
@@ -82,7 +83,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar me={me} crumbs={crumbs} onOpenNav={() => setNavOpen(true)} onLogout={logout} />
         <main id="main" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-[1400px] flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8">
-          {children}
+          {(() => {
+            const needed = requiredPermission(pathname);
+            return !needed || can(needed) ? children : <NoAccess role={me.user.role} />;
+          })()}
         </main>
       </div>
     </div>

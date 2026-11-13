@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { VehicleForm } from "@/components/forms";
-import { Badge, Button, Card, DataTable, ErrorState, Modal, PageHeader, StackedBar, StatusBadge, TableSkeleton, Tabs, statusSegments, useToast, type Column } from "@/components/ds";
+import { Badge, Button, Card, DataTable, ErrorState, ListCard, Modal, PageHeader, StackedBar, StatusBadge, TableSkeleton, Tabs, statusSegments, useToast, type Column } from "@/components/ds";
 import { fmtNum, FUEL_UNIT, humanize } from "@/lib/format";
 import type { Vehicle } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
@@ -88,6 +88,19 @@ export default function VehiclesPage() {
           searchPlaceholder="Search registration, make, depot…"
           initialSort={{ key: "reg", dir: "asc" }}
           caption="Vehicles"
+          mobileCard={(v) => (
+            <ListCard
+              title={<Link href={`/vehicles/${v.id}`} className="font-medium text-brand-700 hover:underline">{v.registrationNumber}</Link>}
+              status={<StatusBadge status={v.status} />}
+              subtitle={`${humanize(v.type)}${[v.make, v.model].some(Boolean) ? ` · ${[v.make, v.model].filter(Boolean).join(" ")}` : ""}`}
+              details={[
+                ["Capacity", fmtNum(v.capacityKg, "kg")],
+                ["Fuel", `${humanize(v.fuelType)} · ${v.mileageKmPerUnit} km/${FUEL_UNIT[v.fuelType]}`],
+                ["Depot", v.depotLocation?.name ?? <span key="d" className="font-medium text-warning-700">Not set</span>],
+                ["Odometer", fmtNum(v.odometerKm, "km")],
+              ]}
+            />
+          )}
           empty={{
             title: all.length ? "No vehicles with this status" : "No vehicles yet",
             icon: Truck,

@@ -27,6 +27,9 @@ services:
       PUBLIC_APP_URL: http://localhost:3000
       SEED_DEMO: ${SEED_DEMO:-true}
       UPLOAD_DIR: /app/uploads
+      # Optional location search (see .env.example); off unless set.
+      PLACES_PROVIDER: ${PLACES_PROVIDER:-none}
+      PLACES_API_KEY: ${PLACES_API_KEY:-}
     volumes:
       - uploads:/app/uploads
     ports:

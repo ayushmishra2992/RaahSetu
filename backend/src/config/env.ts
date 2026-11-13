@@ -20,6 +20,17 @@ const EnvSchema = z.object({
   UPLOAD_DIR: z.string().default("./uploads"),
   MAX_UPLOAD_MB: z.coerce.number().positive().default(5),
   AUTH_RATE_LIMIT_PER_15_MIN: z.coerce.number().int().positive().default(50),
+  // Location search (optional). "none" keeps search off; the UI then uses the map pin / manual coordinates.
+  PLACES_PROVIDER: z.enum(["none", "locationiq", "geoapify"]).default("none"),
+  PLACES_API_KEY: z.string().optional(),
+  // Optional second provider, used only when the first one fails (not when it finds nothing).
+  PLACES_FALLBACK_PROVIDER: z.enum(["none", "locationiq", "geoapify"]).default("none"),
+  PLACES_FALLBACK_API_KEY: z.string().optional(),
+  PLACES_COUNTRY: z
+    .string()
+    .regex(/^[a-z]{2}$/, "PLACES_COUNTRY must be a two-letter lower-case country code")
+    .default("in"),
+  PLACES_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -36,13 +36,15 @@ test.describe("authentication", () => {
     expect(calls(api, "POST", "/api/auth/login")).toHaveLength(1);
   });
 
-  test("login ignores off-site redirect targets", async ({ page }) => {
-    await page.goto("/login?next=//evil.example");
-    await page.getByLabel("Email").fill("qa-admin@example.test");
-    await page.getByLabel("Password").fill("Correct-horse1");
-    await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
-  });
+  for (const next of ["//evil.example", "/%5Cevil.example"]) {
+    test(`login ignores off-site redirect target ${next}`, async ({ page }) => {
+      await page.goto(`/login?next=${next}`);
+      await page.getByLabel("Email").fill("qa-admin@example.test");
+      await page.getByLabel("Password").fill("Correct-horse1");
+      await page.getByRole("button", { name: "Log in" }).click();
+      await expect(page).toHaveURL(/^http:\/\/localhost:\d+\/dashboard$/);
+    });
+  }
 
   test("log out from the account menu", async ({ page, api }) => {
     await page.goto("/dashboard");

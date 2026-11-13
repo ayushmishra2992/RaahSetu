@@ -1,9 +1,10 @@
-# RaahSetu 2.0 — API reference
+# RaahSetu — API reference
 
 Base URL (development): `http://localhost:5000/api` — or `http://localhost:3000/api` through the Next.js proxy.
 
 **Auth:** `POST /auth/login` sets an httpOnly `rs_token` cookie and also returns `token`; send it as `Authorization: Bearer <token>` from non-browser clients.
-**Errors:** `{ "error": { "code": "BAD_REQUEST" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "UNPROCESSABLE" | "RATE_LIMITED" | "INTERNAL", "message": "...", "details": [...] } }`.
+**Errors:** `{ "error": { "code": "BAD_REQUEST" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "UNPROCESSABLE" | "RATE_LIMITED" | "INTERNAL", "message": "...", "details": [...] } }`. Location-search endpoints add `PLACES_DISABLED`, `PLACES_RATE_LIMITED`, `PLACES_UNAVAILABLE`, `PLACES_TIMEOUT` and `PLACES_REVERSE_UNSUPPORTED`.
+**Rate limits:** `/auth/*` (`AUTH_RATE_LIMIT_PER_15_MIN` per IP), `/public/verify/*` (60/min per IP), `/places/autocomplete` + `/places/reverse` (shared `PLACES_RATE_LIMIT_PER_MIN` per company). Exceeding a limit returns `429`.
 **Tenancy:** all authenticated routes are scoped to the caller's company. Records of other companies return `404`.
 **Dates:** ISO-8601 strings (UTC). **IDs:** positive integers.
 
@@ -70,12 +71,25 @@ Permission names below map to roles in `backend/src/lib/permissions.ts`:
 | Method & path | Permission | Body / query |
 |---|---|---|
 | `GET /locations` | locations:read | |
-| `POST /locations` · `PATCH /locations/:id` · `DELETE /locations/:id` | locations:write | `{ name, type, lat, lng, address?, roadNodeId? }` |
+| `POST /locations` · `PATCH /locations/:id` | locations:write | `{ name, type, lat, lng, address?, roadNodeId?, city?, state?, postalCode?, country?, placeProvider?, providerPlaceId?, coordsSource? }` — `type` ∈ DEPOT/WAREHOUSE/CUSTOMER/OTHER; `state` is stored under its canonical Indian state/UT name ("Orissa" → "Odisha", "NCT of Delhi" → "Delhi"); `placeProvider` ∈ locationiq/geoapify; `coordsSource` ∈ MANUAL/SEARCH/PIN_ADJUSTED (default MANUAL); blank text is stored as `null` |
+| `DELETE /locations/:id` | locations:write | 409 if used by orders or trips |
 | `GET /road-network` | locations:read | `{ nodes, edges }` |
 | `POST /road-network/nodes` · `DELETE /road-network/nodes/:id` | locations:write | `{ name, lat, lng }` |
 | `POST /road-network/edges` | locations:write | `{ fromNodeId, toNodeId, distanceKm?, speedKmph?, bidirectional?, name? }` (distance defaults to straight line × 1.25) |
 | `PATCH /road-network/edges/:id` · `DELETE …` | locations:write | `{ isClosed?, speedKmph?, distanceKm?, name? }` |
 | `GET /road-network/path?from=&to=` | locations:read | Shortest path (A*) plus Dijkstra comparison |
+
+## Location search — `/places`
+
+Server-side proxy to the configured provider (`PLACES_PROVIDER`); the API key never reaches the browser. Responses carry `Cache-Control: no-store`.
+
+| Method & path | Permission | Query / response |
+|---|---|---|
+| `GET /places/status` | locations:read | `{ enabled, provider, fallback, reverse, attribution[], minQueryLength, reason? }` — `reason` is `not_configured` or `missing_key` when disabled |
+| `GET /places/autocomplete?q=` | locations:write | `q` 3–120 chars → `{ provider, attribution[], results[] }`; each result: `{ providerPlaceId, name, address, city, state, postalCode, country, lat, lng }` (Indian results: canonical state/UT, settlement as city, 6-digit PIN or `null`). `503 PLACES_DISABLED` when no provider is configured |
+| `GET /places/reverse?lat=&lng=` | locations:write | `{ provider, attribution[], place \| null, distanceM }` — nearest address to the point; `distanceM` is the distance from the requested point to the matched address. `501` if the provider has no reverse lookup |
+
+`provider` and `attribution` always name whichever provider actually answered (the fallback, if configured and the primary failed).
 
 ## Orders — `/orders`
 

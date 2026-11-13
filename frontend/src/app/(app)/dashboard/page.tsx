@@ -113,7 +113,7 @@ export default function ControlTowerPage() {
     can("optimize:run") && { href: "/optiroute", label: "Plan routes", icon: Route },
     can("trips:write") && { href: "/trips/new", label: "Create trip", icon: Truck },
     can("documents:write") && { href: "/documents?new=1", label: "Add document", icon: FilePlus2 },
-    can("fuel:write") && { href: "/greenfleet#log-fuel", label: "Log fuel", icon: Fuel },
+    can("fuel:write") && { href: "/greenfleet?tab=fuel", label: "Log fuel", icon: Fuel },
   ].filter(Boolean) as Array<{ href: string; label: string; icon: typeof Route }>;
 
   if (ct.loading && !ct.data) return <Loading variant="page" label="Loading Control Tower…" />;
