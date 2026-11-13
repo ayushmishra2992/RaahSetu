@@ -9,6 +9,9 @@ const backendUrl = (process.env.BACKEND_URL ?? "http://localhost:5000").replace(
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Production type-check covers the app; Playwright specs (which import backend
+  // source and its generated Prisma types) are checked by `npm run typecheck`.
+  typescript: { tsconfigPath: "tsconfig.build.json" },
   // Docker image uses the self-contained server; normal builds are unchanged.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   reactStrictMode: true,
