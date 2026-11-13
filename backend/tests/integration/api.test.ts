@@ -504,4 +504,82 @@ describe.skipIf(!enabled)("RaahSetu API (integration, real PostgreSQL)", () => {
       expect((await request(app).get("/api/greenfleet/vehicle/abc").set(auth(C))).status).toBe(400);
     });
   });
+  describe("dispatch scheduling with a next-day delivery window", () => {
+    // Regression for ORD-20261113-AG43KZ: goods ready one evening, delivery window the next
+    // evening, 140 min service, Mini truck with depot at the pickup, 10 h shift driver.
+    let E: Tenant;
+    const e: Record<string, number> = {};
+    // 20:40 IST three days from now (IST = UTC+05:30, so 15:10 UTC), and the next day's window.
+    const readyAt = new Date(Date.now() + 3 * 86400000);
+    readyAt.setUTCHours(15, 10, 0, 0);
+    const windowStart = new Date(readyAt.getTime() + 24 * 60 * 60000);
+    const windowEnd = new Date(windowStart.getTime() + 181 * 60000);
+    const minute = 60000;
+
+    beforeAll(async () => {
+      E = await registerCompany("e");
+      const loc = async (name: string, lat: number, lng: number, type: string) => {
+        const r = await request(app).post("/api/locations").set(auth(E)).send({ name, lat, lng, type });
+        expect(r.status).toBe(201);
+        return r.body.id as number;
+      };
+      e.bennett = await loc("Bennett University", 28.4503, 77.5843, "DEPOT");
+      e.amity = await loc("Amity University, Noida", 28.5445, 77.333, "CUSTOMER");
+      const v = await request(app).post("/api/vehicles").set(auth(E)).send({ registrationNumber: "DL5SKR2184", type: "MINI_TRUCK", capacityKg: 250, fuelType: "DIESEL", mileageKmPerUnit: 10, depotLocationId: e.bennett });
+      expect(v.status).toBe(201);
+      e.vehicle = v.body.id;
+      const future = new Date(Date.now() + 365 * 86400000).toISOString();
+      for (const [key, name, lic, shift] of [["ramesh", "Ramesh Singla", "DL0120200000101", 10], ["karan", "Karan Frn", "DL0120200000102", 16]] as const) {
+        const d = await request(app).post("/api/drivers").set(auth(E)).send({ name, phone: "+91 90000 20001", licenseNumber: lic, licenseExpiry: future, maxShiftHours: shift });
+        expect(d.status).toBe(201);
+        e[key] = d.body.id;
+      }
+    });
+
+    const newOrder = async (serviceMinutes: number) => {
+      const o = await request(app).post("/api/orders").set(auth(E)).send({
+        customerName: "Amity University",
+        pickupLocationId: e.bennett,
+        dropLocationId: e.amity,
+        weightKg: 250,
+        serviceMinutes,
+        readyAt: readyAt.toISOString(),
+        windowStart: windowStart.toISOString(),
+        windowEnd: windowEnd.toISOString(),
+      });
+      expect(o.status).toBe(201);
+      return o.body.id as number;
+    };
+
+    it("dispatches manually with a 10 h driver by leaving the next day instead of waiting", async () => {
+      const orderId = await newOrder(140);
+      const r = await request(app).post("/api/trips").set(auth(E)).send({ vehicleId: e.vehicle, driverId: e.ramesh, orderIds: [orderId] });
+      expect(r.status).toBe(201);
+      const trip = await request(app).get(`/api/trips/${r.body.id}`).set(auth(E));
+      expect(trip.status).toBe(200);
+      const start = new Date(trip.body.plannedStart).getTime();
+      const end = new Date(trip.body.plannedEnd).getTime();
+      const stops = trip.body.stops as Array<{ type: string; plannedArrival: string }>;
+      const pickup = new Date(stops.find((s) => s.type === "PICKUP")!.plannedArrival).getTime();
+      const drop = new Date(stops.find((s) => s.type === "DROP")!.plannedArrival).getTime();
+      // Plan minutes are rounded to whole minutes, hence the one-minute tolerance.
+      expect(start).toBeGreaterThan(readyAt.getTime()); // leaves after the goods are ready, on the next day
+      expect(pickup).toBeGreaterThanOrEqual(readyAt.getTime() - minute);
+      expect(drop).toBeGreaterThanOrEqual(windowStart.getTime() - minute);
+      expect(drop).toBeLessThanOrEqual(windowEnd.getTime() + minute);
+      expect(end - start).toBeLessThanOrEqual(10 * 60 * minute); // within Ramesh's 10 h shift
+      // Free the vehicle and driver for the next case.
+      expect((await request(app).post(`/api/trips/${r.body.id}/status`).set(auth(E)).send({ status: "CANCELLED" })).status).toBe(200);
+    });
+
+    it("still rejects a genuinely infeasible trip (service alone exceeds the shift)", async () => {
+      const orderId = await newOrder(400); // 2 × 400 min of service > 10 h
+      const r = await request(app).post("/api/trips").set(auth(E)).send({ vehicleId: e.vehicle, driverId: e.ramesh, orderIds: [orderId] });
+      expect(r.status).toBe(422);
+      expect(JSON.stringify(r.body.error.details)).toMatch(/time window or driver shift/);
+      // The 16 h driver can do it: 2 × 400 min plus driving fits in 960 min.
+      const ok = await request(app).post("/api/trips").set(auth(E)).send({ vehicleId: e.vehicle, driverId: e.karan, orderIds: [orderId] });
+      expect(ok.status).toBe(201);
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_COST_MODEL, DEFAULT_WEIGHTS } from "../../src/optimizer/costModel";
 import { haversineMatrix } from "../../src/optimizer/distance";
+import { evaluateRoute } from "../../src/optimizer/evaluate";
 import { InstanceError, solve } from "../../src/optimizer/solver";
 import { syntheticInstance } from "../../src/optimizer/synthetic";
 import type { Instance, OptOrder, OptVehicle } from "../../src/optimizer/types";
@@ -179,5 +180,115 @@ describe("OptiRoute solver", () => {
     const s = solve(syntheticInstance({ orders: 10, vehicles: 3, seed: 3 }));
     const b = s.objective;
     expect(b.time + b.distance + b.cost + b.emissions + b.lateness + b.risk + b.unservedPenalty).toBeCloseTo(b.total, 6);
+  });
+});
+
+describe("departure scheduling (forward time slack)", () => {
+  // Regression for ORD-20261113-AG43KZ: goods ready one evening, delivery window the next
+  // evening. Waiting ~a day after pickup must not count against the driver's shift when the
+  // vehicle can simply leave later.
+  const DAY = 24 * 60;
+  const gapOrder = (over: Partial<OptOrder> = {}) =>
+    order({ id: 1, weightKg: 250, serviceMinutes: 140, readyAtMin: 100, windowStartMin: 100 + DAY, windowEndMin: 100 + DAY + 181, ...over });
+  const stopsOf = (s: ReturnType<typeof solve>) => s.routes.find((r) => r.stops.length)!.stops;
+
+  for (const shift of [600, 960]) {
+    it(`serves a next-day delivery window within a ${shift / 60} h shift by leaving later`, () => {
+      const s = solve(instance([vehicle({ capacityKg: 250, maxShiftMinutes: shift })], [gapOrder()]));
+      expect(s.unserved).toHaveLength(0);
+      expect(s.feasible).toBe(true);
+      expect(s.violations).toEqual([]);
+      const stops = stopsOf(s);
+      const depart = stops[0];
+      const pickup = stops.find((x) => x.type === "PICKUP")!;
+      const drop = stops.find((x) => x.type === "DROP")!;
+      expect(pickup.serviceStartMin).toBeGreaterThanOrEqual(100); // never before readyAt
+      expect(drop.serviceStartMin).toBeGreaterThanOrEqual(100 + DAY); // never before the window
+      expect(drop.serviceStartMin).toBeLessThanOrEqual(100 + DAY + 181); // never after it
+      expect(drop.serviceStartMin).toBeCloseTo(100 + DAY, 6); // arrives exactly at window start
+      expect(depart.departureMin).toBeGreaterThan(100); // departure was delayed past readyAt
+      const route = s.routes.find((r) => r.stops.length)!;
+      expect(route.metrics.waitingMin).toBeCloseTo(0, 6);
+      expect(route.metrics.durationMin).toBeLessThanOrEqual(shift);
+    });
+  }
+
+  it("still rejects a route whose actual working time exceeds the shift", () => {
+    // 2 × 400 min of service alone exceeds a 600 min shift, however late the vehicle leaves.
+    const s = solve(instance([vehicle({ maxShiftMinutes: 600 })], [gapOrder({ serviceMinutes: 400, weightKg: 300 })]));
+    expect(s.unserved).toHaveLength(1);
+    expect(s.unserved[0].reason).toMatch(/time window or driver shift/);
+    const ev = evaluateRoute(instance([vehicle({ maxShiftMinutes: 600 })], []), { orders: new Map([[1, gapOrder({ serviceMinutes: 400, weightKg: 300 })]]) }, vehicle({ maxShiftMinutes: 600 }), [
+      { kind: "PICKUP", orderId: 1 },
+      { kind: "DROP", orderId: 1 },
+    ]);
+    expect(ev.feasible).toBe(false);
+    expect(ev.reason).toBe("SHIFT_LIMIT");
+  });
+
+  it("still rejects a delivery window that cannot be reached in time", () => {
+    // Ready at 100, window closes at 101: impossible regardless of departure time.
+    const s = solve(instance([vehicle()], [gapOrder({ windowStartMin: 100, windowEndMin: 101 })]));
+    expect(s.unserved).toHaveLength(1);
+  });
+
+  it("limits the delay by another stop's window end in a multi-order route", () => {
+    const o1 = order({ id: 1, pickupLocationId: 2, dropLocationId: 3, windowStartMin: 0, windowEndMin: 100 });
+    const o2 = order({ id: 2, pickupLocationId: 3, dropLocationId: 4, windowStartMin: 1000, windowEndMin: 1100 });
+    const long = vehicle({ maxShiftMinutes: 1200 });
+    const inst = instance([long], [o1, o2]);
+    const ctx = { orders: new Map([[1, o1], [2, o2]]) };
+    const seq = [
+      { kind: "PICKUP" as const, orderId: 1 },
+      { kind: "DROP" as const, orderId: 1 },
+      { kind: "PICKUP" as const, orderId: 2 },
+      { kind: "DROP" as const, orderId: 2 },
+    ];
+    // Waiting that cannot be removed (order 1 must be delivered by 100, order 2 not before 1000)
+    // still counts as working time: a 10 h shift is genuinely too short for this sequence.
+    expect(evaluateRoute(instance([vehicle()], [o1, o2]), ctx, vehicle(), seq)).toMatchObject({ feasible: false, reason: "SHIFT_LIMIT" });
+    const ev = evaluateRoute(inst, ctx, long, seq);
+    expect(ev.feasible).toBe(true);
+    const drop1 = ev.stops.find((x) => x.type === "DROP" && x.orderId === 1)!;
+    const drop2 = ev.stops.find((x) => x.type === "DROP" && x.orderId === 2)!;
+    // Order 1's window end caps the delay: it is now served exactly at its window end, not later.
+    expect(drop1.serviceStartMin).toBeCloseTo(100, 6);
+    expect(drop2.serviceStartMin).toBeGreaterThanOrEqual(1000);
+    expect(drop2.serviceStartMin).toBeLessThanOrEqual(1100);
+    expect(ev.stops[0].departureMin).toBeGreaterThan(0); // delayed …
+    expect(ev.metrics.waitingMin).toBeGreaterThan(0); // … but the remaining wait is unavoidable
+    expect(ev.metrics.durationMin).toBeLessThanOrEqual(1200);
+    const plan = validatePlan(inst, [{ vehicleId: 1, vehicleLabel: "V1", driverId: 1, stops: ev.stops, metrics: ev.metrics }], []);
+    expect(plan.filter((v) => v.code === "TIME_WINDOW" || v.code === "SHIFT_LIMIT")).toEqual([]);
+  });
+
+  it("never adds lateness when time windows are soft", () => {
+    const late = order({ id: 1, pickupLocationId: 2, dropLocationId: 3, windowEndMin: 1 }); // late whatever we do
+    const later = order({ id: 2, pickupLocationId: 3, dropLocationId: 4, windowStartMin: 2000 });
+    const inst = instance([vehicle({ maxShiftMinutes: 5000 })], [late, later], { hardTimeWindows: false });
+    const ctx = { orders: new Map([[1, late], [2, later]]) };
+    const ev = evaluateRoute(inst, ctx, vehicle({ maxShiftMinutes: 5000 }), [
+      { kind: "PICKUP", orderId: 1 },
+      { kind: "DROP", orderId: 1 },
+      { kind: "PICKUP", orderId: 2 },
+      { kind: "DROP", orderId: 2 },
+    ]);
+    expect(ev.feasible).toBe(true);
+    expect(ev.stops[0].departureMin).toBe(0); // no delay: it would make order 1 later still
+    const drop1 = ev.stops.find((x) => x.type === "DROP" && x.orderId === 1)!;
+    expect(drop1.latenessMin).toBeCloseTo(drop1.arrivalMin - 1, 6);
+  });
+
+  it("accepts a drop that starts exactly at the window end", () => {
+    const s = solve(instance([vehicle()], [gapOrder({ windowStartMin: 100 + DAY, windowEndMin: 100 + DAY })]));
+    expect(s.unserved).toHaveLength(0);
+    expect(stopsOf(s).find((x) => x.type === "DROP")!.serviceStartMin).toBeCloseTo(100 + DAY, 6);
+  });
+
+  it("does not delay a route that has no waiting, and never departs before the plan start", () => {
+    const s = solve(instance([vehicle()], [order({ id: 1 })]));
+    const stops = stopsOf(s);
+    expect(stops[0].departureMin).toBe(0);
+    expect(s.routes.find((r) => r.stops.length)!.metrics.waitingMin).toBe(0);
   });
 });
