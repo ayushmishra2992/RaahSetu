@@ -118,7 +118,7 @@ export default function TripDetailPage() {
             </Button>
             {can("billing:write") && t.status === "COMPLETED" && (
               <LinkButton href={`/billing?tripId=${t.id}`} variant="secondary" icon={ReceiptText}>
-                Create invoice
+                Create invoice / challan
               </LinkButton>
             )}
           </>

@@ -10,6 +10,7 @@ describe("navigation", () => {
       "/dashboard|dashboard:read",
       "/orders|orders:read",
       "/trips|trips:read",
+      "/transport-documents|shipments:read",
       "/optiroute|optimize:read",
       "/scenarios|optimize:read",
       "/vehicles|fleet:read",
@@ -22,6 +23,12 @@ describe("navigation", () => {
       "/audit|audit:read",
       "/settings|",
     ]);
+  });
+
+  it("labels transport document pages in the breadcrumb trail", () => {
+    expect(breadcrumbsFor("/transport-documents")).toEqual([{ label: "Operations" }, { label: "Transport Documents", href: "/transport-documents" }]);
+    expect(breadcrumbsFor("/transport-documents/eway-bills/7").at(-1)).toEqual({ label: "E-Way Bill" });
+    expect(breadcrumbsFor("/transport-documents/lorry-receipts/3").at(-1)).toEqual({ label: "Lorry receipt" });
   });
 
   it("filters items by permission and drops empty groups", () => {

@@ -66,6 +66,15 @@ export const ComplianceSettingsSchema = z.object({
 
 export type ComplianceSettings = z.infer<typeof ComplianceSettingsSchema>;
 
+/**
+ * Wording the company prints on its transport documents. RaahSetu supplies no legal
+ * text of its own: empty terms print no terms section at all.
+ */
+export const TransportDocumentSettingsSchema = z.object({
+  /** Terms and conditions printed on lorry receipts (copied onto each LR when it is finalized). */
+  lrTerms: z.string().trim().max(2000).default(""),
+});
+
 export const CompanySettingsSchema = z.object({
   fuelPricePerUnit: perFuel(DEFAULT_COST_MODEL.fuelPricePerUnit),
   emissionKgPerUnit: perFuel(DEFAULT_COST_MODEL.emissionKgPerUnit),
@@ -76,6 +85,7 @@ export const CompanySettingsSchema = z.object({
   currency: z.string().default("INR"),
   // prefault: parse {} through the inner schema so every nested default applies.
   compliance: ComplianceSettingsSchema.prefault({}),
+  transportDocuments: TransportDocumentSettingsSchema.prefault({}),
 });
 
 export type CompanySettings = z.infer<typeof CompanySettingsSchema>;

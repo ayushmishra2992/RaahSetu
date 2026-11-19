@@ -1,5 +1,5 @@
 import { env } from "../../config/env";
-import { boxes, fields, fmtDate, footer, header, paragraph, renderPdf, rs, sectionTitle, signatures, table } from "../../lib/pdf";
+import { boxes, fields, fmtDate, footer, header, paragraph, renderPdf, rs, sectionTitle, signatures, STANDARD_DISCLAIMER, table } from "../../lib/pdf";
 
 export const verifyUrl = (token: string) => `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/verify/${token}`;
 
@@ -127,9 +127,14 @@ export interface LrPdfInput {
   actualWeightKg: number | null;
   chargedWeightKg: number | null;
   freightAmount: number | null;
+  advanceAmount: number | null;
   paymentTerms: string;
   declaredValue: number | null;
   deliveryInstructions: string | null;
+  finalizedAt: Date | null;
+  cancelReason: string | null;
+  /** The company's own LR terms (snapshot for finalized LRs, current settings for drafts); empty prints none. */
+  terms: string | null;
   orderNumber: string;
   ewayBills: string[];
   issuer: Issuer;
@@ -138,21 +143,41 @@ export interface LrPdfInput {
 
 const TERMS: Record<string, string> = { PAID: "Paid", TO_PAY: "To pay (collect from consignee)", TO_BE_BILLED: "To be billed" };
 
+/** Footer text of an LR: the standard disclaimer always, preceded by the draft notice on drafts. */
+export function lrFooterNote(draft: boolean) {
+  return draft ? `DRAFT — this lorry receipt has not been finalized and may still change. ${STANDARD_DISCLAIMER}` : STANDARD_DISCLAIMER;
+}
+
+/** Balance still due on the freight; null when no freight is recorded. */
+export function lrBalance(freight: number | null, advance: number | null) {
+  return freight == null ? null : Math.round((freight - (advance ?? 0)) * 100) / 100;
+}
+
 export function lrPdf(d: LrPdfInput) {
+  const cancelled = d.status === "CANCELLED";
+  const draft = !cancelled && !d.finalizedAt;
   return renderPdf(
     (doc) => {
-      header(doc, { title: "Lorry Receipt", number: d.lrNumber, date: d.bookingDate, issuer: d.issuer, extra: [["Order", d.orderNumber], ...(d.status === "CANCELLED" ? ([["Status", "CANCELLED"]] as Array<[string, string]>) : [])] });
+      header(doc, {
+        title: "Lorry Receipt",
+        number: d.lrNumber,
+        date: d.bookingDate,
+        issuer: d.issuer,
+        extra: [["Order", d.orderNumber], ...(d.trip ? ([["Trip", d.trip.tripNumber]] as Array<[string, string]>) : []), ["Status", cancelled ? "CANCELLED" : draft ? "DRAFT" : "FINAL"]],
+      });
+      if (cancelled) paragraph(doc, "Cancelled", `This lorry receipt was cancelled and is not valid.${d.cancelReason ? ` Reason: ${d.cancelReason}` : ""}`);
       boxes(doc, [
         { title: "Consignor", lines: [d.consignorName, d.consignorAddress, d.consignorGstin ? `GSTIN: ${d.consignorGstin}` : null] },
         { title: "Consignee", lines: [d.consigneeName, d.consigneeAddress, d.consigneeGstin ? `GSTIN: ${d.consigneeGstin}` : null] },
       ]);
+      sectionTitle(doc, "Movement");
       fields(doc, [
         ["From", d.fromPlace],
         ["To", d.toPlace],
         ["Booking date", fmtDate(d.bookingDate)],
-        ["Vehicle", d.trip?.vehicle.registrationNumber],
+        ["Vehicle", d.trip ? `${d.trip.vehicle.registrationNumber} (${d.trip.vehicle.type.replace("_", " ").toLowerCase()})` : null],
         ["Driver", d.trip ? `${d.trip.driver.name}, ${d.trip.driver.phone}` : null],
-        ["Trip", d.trip?.tripNumber],
+        ["Driver licence", d.trip?.driver.licenseNumber],
       ]);
       sectionTitle(doc, "Goods");
       table(
@@ -169,13 +194,16 @@ export function lrPdf(d: LrPdfInput) {
       sectionTitle(doc, "Freight");
       fields(doc, [
         ["Freight", rs(d.freightAmount)],
+        ["Advance received", d.advanceAmount != null ? rs(d.advanceAmount) : null],
+        ["Balance", rs(lrBalance(d.freightAmount, d.advanceAmount))],
         ["Payment terms", TERMS[d.paymentTerms] ?? d.paymentTerms],
         ["E-Way Bill(s)", d.ewayBills.length ? d.ewayBills.join(", ") : null],
       ]);
       paragraph(doc, "Delivery instructions", d.deliveryInstructions);
-      paragraph(doc, "Terms", "Goods are carried at owner's risk unless insured. The consignee must check the goods on delivery and note any shortage or damage on this receipt.");
+      // Only the company's own configured wording is printed, labelled as such.
+      paragraph(doc, `Terms and conditions set by ${d.issuer.name}`, d.terms);
       signatures(doc, ["Consignor's signature", "Receiver's signature, date & stamp", `For ${d.issuer.name}`]);
-      return footer(doc, {});
+      return footer(doc, { note: lrFooterNote(draft) });
     },
     { title: `Lorry Receipt ${d.lrNumber}` },
   );

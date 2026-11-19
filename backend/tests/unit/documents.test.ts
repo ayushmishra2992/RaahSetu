@@ -1,9 +1,9 @@
-import { inflateRawSync } from "node:zlib";
+import { inflateRawSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { fmtDate, rs, t } from "../../src/lib/pdf";
+import { fmtDate, rs, STANDARD_DISCLAIMER, t } from "../../src/lib/pdf";
 import { assertAllowedFile, safeFileName, signFileToken, verifyFileToken } from "../../src/lib/storage";
 import { createZip, safeZipName } from "../../src/lib/zip";
-import { billingPdf, lrPdf } from "../../src/modules/shipments/pdfs";
+import { billingPdf, lrBalance, lrFooterNote, lrPdf } from "../../src/modules/shipments/pdfs";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
 const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
@@ -138,7 +138,7 @@ describe("pdf helpers", () => {
     });
     expect(challan.subarray(0, 5).toString()).toBe("%PDF-");
     expect(challan.length).toBeGreaterThan(2000);
-    const lr = await lrPdf({
+    const lrInput = {
       lrNumber: "LR-20261118-ABC123",
       status: "ACTIVE",
       bookingDate: new Date(),
@@ -156,14 +156,80 @@ describe("pdf helpers", () => {
       actualWeightKg: 250,
       chargedWeightKg: 300,
       freightAmount: 4500,
+      advanceAmount: 1500,
       paymentTerms: "TO_PAY",
       declaredValue: 60000,
       deliveryInstructions: null,
+      finalizedAt: null,
+      cancelReason: null,
+      terms: null,
       orderNumber: "ORD-1",
       ewayBills: ["123456789012"],
       issuer,
       trip: null,
-    });
-    expect(lr.subarray(0, 5).toString()).toBe("%PDF-");
+    };
+    // Draft, finalized (with company terms) and cancelled variants all render.
+    for (const variant of [lrInput, { ...lrInput, finalizedAt: new Date(), terms: "Company terms line 1" }, { ...lrInput, status: "CANCELLED", cancelReason: "Wrong consignee" }]) {
+      const lr = await lrPdf(variant);
+      expect(lr.subarray(0, 5).toString()).toBe("%PDF-");
+    }
+  });
+
+  it("prints the draft notice AND the standard disclaimer on draft LRs, and only the disclaimer otherwise", async () => {
+    // Footer text logic.
+    expect(lrFooterNote(true)).toContain("has not been finalized");
+    expect(lrFooterNote(true)).toContain(STANDARD_DISCLAIMER);
+    expect(lrFooterNote(false)).toBe(STANDARD_DISCLAIMER);
+
+    // And in the rendered PDF itself (text read back from the decompressed content streams).
+    const base = {
+      lrNumber: "LR-20261119-PDF001", status: "ACTIVE", bookingDate: new Date(), consignorName: "Synthetic Transport", consignorAddress: null, consignorGstin: null,
+      consigneeName: "Synthetic Consignee", consigneeAddress: null, consigneeGstin: null, fromPlace: "A", toPlace: "B", goodsDescription: "Synthetic goods",
+      packages: null, packageType: null, actualWeightKg: null, chargedWeightKg: null, freightAmount: null, advanceAmount: null, paymentTerms: "TO_BE_BILLED",
+      declaredValue: null, deliveryInstructions: null, finalizedAt: null as Date | null, cancelReason: null as string | null, terms: null, orderNumber: "ORD-1", ewayBills: [],
+      issuer: { name: "Synthetic Transport", address: null, city: null, state: null, gstNumber: null, phone: null }, trip: null,
+    };
+    const disclaimer = squash("it is not a government (GST, E-Way Bill or VAHAN) verification");
+    const draftNotice = squash("this lorry receipt has not been finalized");
+    const draft = pdfText(await lrPdf(base));
+    expect(draft).toContain(draftNotice);
+    expect(draft).toContain(disclaimer);
+    const final = pdfText(await lrPdf({ ...base, finalizedAt: new Date() }));
+    expect(final).toContain(disclaimer);
+    expect(final).not.toContain(draftNotice);
+    const cancelled = pdfText(await lrPdf({ ...base, status: "CANCELLED", cancelReason: "Synthetic duplicate" }));
+    expect(cancelled).toContain(disclaimer);
+    expect(cancelled).not.toContain(draftNotice);
+  });
+
+  it("computes the LR balance as freight minus advance, rounded to paise", () => {
+    expect(lrBalance(4500, 1500)).toBe(3000);
+    expect(lrBalance(4500, null)).toBe(4500);
+    expect(lrBalance(100.1, 33.37)).toBe(66.73);
+    expect(lrBalance(null, null)).toBeNull();
   });
 });
+
+/** Lower-case text without whitespace, so wrapped lines and kerning splits don't matter when comparing. */
+function squash(text: string) {
+  return text.replace(/\s+/g, "").toLowerCase();
+}
+
+/** Text drawn in a PDFKit PDF: inflate each content stream and decode its hex text strings. */
+function pdfText(pdf: Buffer) {
+  const raw = pdf.toString("latin1");
+  let out = "";
+  const re = /stream\r?\n/g;
+  for (let m = re.exec(raw); m; m = re.exec(raw)) {
+    const start = m.index + m[0].length;
+    const end = raw.indexOf("endstream", start);
+    let body: string;
+    try {
+      body = inflateSync(pdf.subarray(start, end)).toString("latin1");
+    } catch {
+      continue; // not a deflated stream (e.g. an image)
+    }
+    for (const h of body.matchAll(/<([0-9a-fA-F]+)>/g)) out += Buffer.from(h[1], "hex").toString("latin1");
+  }
+  return squash(out);
+}

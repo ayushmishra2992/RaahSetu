@@ -265,3 +265,44 @@ export const tripDocuments = {
   billing: [],
   orders: [{ id: 1, orderNumber: "ORD-QA0001", customerName: "QA Customer", declaredValue: 20000, weightKg: 500, stopId: 3, stopStatus: "PENDING", dropLocation: "Vashi Market", ewayBills: [], lorryReceipts: [], pod: null }],
 };
+
+// ───── Transport documents (synthetic values only) ─────
+const docOrder = { id: 1, orderNumber: "ORD-QA0001", customerName: "QA Customer" };
+const docTrip = { id: 1, tripNumber: "TRP-QA0001" };
+export const ewayBills = [
+  {
+    id: 11, orderId: 1, tripId: 1, ewbNumber: "391012345678", documentDate: iso(-DAY), validFrom: iso(-DAY), validUntil: iso(2 * DAY),
+    supplierName: "QA Supplier Pvt Ltd", supplierGstin: "27AAACQ1234A1Z5", recipientName: "QA Customer", recipientGstin: null,
+    placeOfDispatch: "Bhiwandi", placeOfDelivery: "Vashi Market", goodsDescription: "Synthetic test cartons", hsnCode: "9403",
+    quantity: 20, quantityUnit: "BOX", taxableValue: 75000, invoiceOrChallanRef: "INV-QA-1", transporterId: null, vehicleNumber: "MH04QA1001",
+    transportDocNumber: null, status: "ACTIVE", expired: false, notes: null, cancelledAt: null, cancelReason: null, createdAt: iso(-DAY), updatedAt: iso(-DAY),
+    attachments: [{ id: 501, role: "PAGE", fileName: "ewb-portal-copy.pdf", fileMimeType: "application/pdf", fileSizeBytes: 48_000, sha256: "0".repeat(64), createdAt: iso(-DAY) }],
+    order: docOrder, trip: docTrip,
+  },
+  {
+    id: 12, orderId: 2, tripId: 1, ewbNumber: "391099990000", documentDate: iso(-5 * DAY), validFrom: null, validUntil: iso(-3 * DAY),
+    supplierName: "QA Supplier Pvt Ltd", supplierGstin: null, recipientName: "Thane Customer", recipientGstin: null,
+    placeOfDispatch: "Bhiwandi", placeOfDelivery: "Thane", goodsDescription: "Synthetic test pallets", hsnCode: null,
+    quantity: null, quantityUnit: null, taxableValue: 60000, invoiceOrChallanRef: null, transporterId: null, vehicleNumber: "MH04QA1001",
+    transportDocNumber: null, status: "CANCELLED", expired: true, notes: null, cancelledAt: iso(-4 * DAY), cancelReason: "Synthetic: wrong vehicle", createdAt: iso(-5 * DAY), updatedAt: iso(-4 * DAY),
+    attachments: [], order: { id: 2, orderNumber: "ORD-QA0002", customerName: "Thane Customer" }, trip: docTrip,
+  },
+];
+const lrBase = {
+  orderId: 1, tripId: 1, bookingDate: iso(-DAY), consignorName: "QA Test Logistics", consignorAddress: "Plot 12, MIDC, Bhiwandi", consignorGstin: null,
+  consigneeName: "QA Customer", consigneeAddress: "Vashi Market", consigneeGstin: null, fromPlace: "Bhiwandi, Maharashtra", toPlace: "Vashi Market, Navi Mumbai",
+  goodsDescription: "Synthetic test cartons", packages: 20, packageType: "cartons", actualWeightKg: 500, chargedWeightKg: 550, paymentTerms: "TO_PAY",
+  declaredValue: 20000, deliveryInstructions: null, createdAt: iso(-DAY), updatedAt: iso(-DAY),
+  order: docOrder, trip: { id: 1, tripNumber: "TRP-QA0001", status: "IN_TRANSIT", vehicle: { id: 1, registrationNumber: "MH04QA1001" }, driver: { id: 1, name: "QA Driver One" } },
+};
+export const lorryReceipts = [
+  { ...lrBase, id: 21, lrNumber: "LR-20261118-QA0001", freightAmount: 6500, advanceAmount: 2000, balanceAmount: 4500, status: "ACTIVE", editable: true, finalizedAt: null, termsSnapshot: null, cancelledAt: null, cancelReason: null },
+  { ...lrBase, id: 22, lrNumber: "LR-20261117-QA0002", freightAmount: 4000, advanceAmount: null, balanceAmount: 4000, status: "ACTIVE", editable: false, finalizedAt: iso(-DAY), termsSnapshot: "Synthetic company terms line.", cancelledAt: null, cancelReason: null },
+];
+export const pods = [
+  { id: 31, status: "DELIVERED", receiverName: "QA Receiver", deliveredAt: iso(-3600_000), order: { id: 3, orderNumber: "ORD-QA0003", customerName: "Pune Customer" }, trip: { id: 2, tripNumber: "TRP-QA0002" }, attachments: [] },
+];
+export const docHistory = [
+  { id: 2, action: "file.uploaded", createdAt: iso(-3600_000), userName: "QA Admin", metadata: { files: [{ id: 501, bytes: 48000 }] } },
+  { id: 1, action: "ewaybill.recorded", createdAt: iso(-DAY), userName: "QA Dispatcher", metadata: { orderId: 1, files: 1 } },
+];

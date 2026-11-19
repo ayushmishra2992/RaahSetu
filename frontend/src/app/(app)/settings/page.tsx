@@ -1,11 +1,11 @@
 "use client";
 
-import { Building2, KeyRound, Leaf, Route, ShieldCheck } from "lucide-react";
+import { Building2, KeyRound, Leaf, ReceiptText, Route, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { CompliancePolicyForm } from "@/components/CompliancePolicyForm";
 import { FormShell } from "@/components/forms";
-import { Alert, Card, Field, Input, PageHeader, StatusBadge, Tabs, useToast } from "@/components/ds";
+import { Alert, Card, Field, Input, PageHeader, StatusBadge, Tabs, Textarea, useToast } from "@/components/ds";
 import { api } from "@/lib/api";
 import { humanize } from "@/lib/format";
 import type { Settings } from "@/lib/types";
@@ -31,6 +31,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState(admin ? "company" : "account");
   const [profile, setProfile] = useState({ name: c.name, gstNumber: c.gstNumber ?? "", address: c.address ?? "", city: c.city ?? "", state: c.state ?? "", phone: c.phone ?? "" });
   const [settings, setSettings] = useState<Settings>(c.settings);
+  const [lrTerms, setLrTerms] = useState(c.settings.transportDocuments?.lrTerms ?? "");
   const [pw, setPw] = useState({ currentPassword: "", newPassword: "", confirm: "" });
   const [pwError, setPwError] = useState<string | null>(null);
   const toast = useToast();
@@ -61,6 +62,7 @@ export default function SettingsPage() {
                 { id: "estimates", label: "Costs & emissions" },
                 { id: "optiroute", label: "OptiRoute defaults" },
                 { id: "compliance", label: "Compliance" },
+                { id: "documents", label: "Transport documents" },
               ]
             : []),
           { id: "account", label: "Your account" },
@@ -168,6 +170,24 @@ export default function SettingsPage() {
               toast.success("Compliance policy saved");
             }}
           />
+        </Card>
+      )}
+
+      {admin && tab === "documents" && (
+        <Card title="Lorry receipt terms" icon={ReceiptText} description="Your own terms and conditions, printed on lorry receipts under “Terms and conditions set by your company”. RaahSetu adds no legal wording of its own; leave this empty to print no terms.">
+          <FormShell
+            submitLabel="Save LR terms"
+            onSubmit={async () => {
+              if (lrTerms.trim().length > 2000) throw new Error("Keep the terms under 2,000 characters.");
+              await api("/company", { method: "PATCH", body: { settings: { transportDocuments: { lrTerms: lrTerms.trim() } } } });
+              await refresh();
+              toast.success("LR terms saved");
+            }}
+          >
+            <Field label="Terms and conditions" hint={`${lrTerms.trim().length} / 2,000 characters. Draft LRs show the current text; finalized LRs keep the text they were finalized with.`}>
+              <Textarea rows={8} value={lrTerms} onChange={(e) => setLrTerms(e.target.value)} maxLength={2000} />
+            </Field>
+          </FormShell>
         </Card>
       )}
 

@@ -71,3 +71,18 @@ export function sendPdf(res: import("express").Response, data: Buffer, fileName:
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.send(data);
 }
+
+/** Reason required to cancel a transport document (kept with the record and in the audit log). */
+export const CancelBody = z.object({ reason: z.string().trim().min(3, "Give a reason of at least 3 characters").max(500) });
+
+/**
+ * The audit trail of one transport document, newest first, with the acting user's name.
+ * Callers have already checked the caller may read the document itself.
+ */
+export async function documentHistory(companyId: number, entityType: "EwayBill" | "LorryReceipt", entityId: number) {
+  const events = await prisma.auditEvent.findMany({ where: { companyId, entityType, entityId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 200 });
+  const ids = [...new Set(events.map((e) => e.userId).filter((x): x is number => x != null))];
+  const users = await prisma.user.findMany({ where: { id: { in: ids }, companyId }, select: { id: true, name: true } });
+  const names = new Map(users.map((u) => [u.id, u.name]));
+  return events.map((e) => ({ id: e.id, action: e.action, createdAt: e.createdAt, userName: e.userId ? (names.get(e.userId) ?? null) : null, metadata: e.metadata }));
+}

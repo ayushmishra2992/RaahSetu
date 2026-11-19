@@ -10,6 +10,8 @@ export interface Settings {
   currency: string;
   /** Optional so older API responses (and test fixtures) without it still type-check. */
   compliance?: CompliancePolicy;
+  /** Company wording printed on transport documents (absent on companies that never set it). */
+  transportDocuments?: { lrTerms: string };
 }
 
 export interface CompliancePolicy {
@@ -377,6 +379,7 @@ export interface EwayBill {
   tripId: number | null;
   ewbNumber: string;
   documentDate: string;
+  validFrom?: string | null;
   validUntil: string | null;
   supplierName: string;
   supplierGstin: string | null;
@@ -396,6 +399,62 @@ export interface EwayBill {
   status: "ACTIVE" | "CANCELLED";
   expired?: boolean;
   attachments: Attachment[];
+  notes?: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  order?: { id: number; orderNumber: string; customerName: string };
+  trip?: { id: number; tripNumber: string } | null;
+}
+
+export type FreightPaymentTerms = "PAID" | "TO_PAY" | "TO_BE_BILLED";
+
+/** Full lorry receipt as returned by /lorry-receipts (balance and editability are computed by the API). */
+export interface LorryReceipt {
+  id: number;
+  lrNumber: string;
+  orderId: number;
+  tripId: number | null;
+  bookingDate: string;
+  consignorName: string;
+  consignorAddress: string | null;
+  consignorGstin: string | null;
+  consigneeName: string;
+  consigneeAddress: string | null;
+  consigneeGstin: string | null;
+  fromPlace: string;
+  toPlace: string;
+  goodsDescription: string;
+  packages: number | null;
+  packageType: string | null;
+  actualWeightKg: number | null;
+  chargedWeightKg: number | null;
+  freightAmount: number | null;
+  advanceAmount: number | null;
+  balanceAmount: number | null;
+  paymentTerms: FreightPaymentTerms;
+  declaredValue: number | null;
+  deliveryInstructions: string | null;
+  status: "ACTIVE" | "CANCELLED";
+  editable: boolean;
+  finalizedAt: string | null;
+  termsSnapshot: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  order: { id: number; orderNumber: string; customerName: string };
+  trip: { id: number; tripNumber: string; status: string; vehicle: { id: number; registrationNumber: string }; driver: { id: number; name: string } } | null;
+}
+
+/** One entry of a transport document's audit trail. */
+export interface DocHistoryEvent {
+  id: number;
+  action: string;
+  createdAt: string;
+  userName: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 export interface LorryReceiptSummary {
@@ -403,6 +462,7 @@ export interface LorryReceiptSummary {
   lrNumber: string;
   status: "ACTIVE" | "CANCELLED";
   orderId: number;
+  finalizedAt?: string | null;
 }
 
 export type PodStatus = "DELIVERED" | "PARTIALLY_DELIVERED" | "FAILED" | "RETURNED" | "DISPUTED";

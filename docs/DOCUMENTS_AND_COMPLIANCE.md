@@ -83,7 +83,7 @@ All shipment documents hang off an **order** and optionally a **trip**. They are
 
 ### E-Way Bill (recorded, not generated)
 **Record E-Way Bill** captures what the portal issued:
-- the 12-digit number, document date and valid-until;
+- the 12-digit number, document date, valid-from and valid-until;
 - supplier and recipient, with their GSTINs;
 - places of dispatch and delivery;
 - goods description, HSN code, quantity and taxable value;
@@ -93,11 +93,18 @@ All shipment documents hang off an **order** and optionally a **trip**. They are
 A PDF or photo of the bill can be attached.
 
 Validation:
-- **Formats:** 12-digit number, GSTIN structure, HSN of 4, 6 or 8 digits, and valid-until not before the document date.
+- **Formats:** 12-digit number, GSTIN structure, HSN of 4, 6 or 8 digits.
+- **Dates:** valid-from and valid-until are not before the document date, and valid-until is not before valid-from.
 - **One record per number:** the same number cannot be recorded twice.
 - **Vehicle check:** a warning appears if the bill's vehicle differs from the trip's vehicle. Update Part-B on the portal and edit the record.
 
-**Cancel** marks the record cancelled in RaahSetu only; cancel it on the portal yourself.
+**Managing a recorded E-Way Bill.** Each record has its own page: Transport Documents → E-Way Bills → the number, or the number on the trip panel. From there you can:
+- see every recorded field, its files and its history;
+- **Edit details**, with `shipments:write`, while the record is active;
+- **Add files** later (up to 5 per record) and open any file through a short-lived private link;
+- **Cancel record**, which asks for confirmation and a **reason** (at least 3 characters). The time, the user and the reason are stored, and the record and its files are kept.
+
+A cancelled record can't be edited and accepts no new files (409). Cancelling in RaahSetu does **not** cancel the bill on the government portal; do that on the portal yourself.
 
 ### Lorry receipt (LR / bilty)
 **Issue LR** creates a receipt with a unique number (`LR-YYYYMMDD-XXXXXX`).
@@ -106,7 +113,31 @@ It's pre-filled where possible:
 - **From the order:** consignor (your company), consignee (the customer), from/to places, actual weight, declared value and delivery instructions.
 - **From the trip:** vehicle and driver.
 
-You add the goods description, packages, charged weight, freight and payment terms (*Paid*, *To pay* or *To be billed*). The PDF carries consignor, consignee and receiver signature areas and lists the E-Way Bill numbers.
+You add the goods description, packages, charged weight, freight, an optional **advance received** and the payment terms (*Paid*, *To pay* or *To be billed*). The **balance** is freight minus advance. An advance needs a freight amount and can't exceed it (400).
+
+**Lifecycle.** Every LR has its own page: Transport Documents → Lorry receipts → the number, or the number on the trip panel.
+
+| State | What you can do |
+|---|---|
+| **Draft** | Edit every field, then **Finalize**. The PDF is marked "DRAFT" and previews your current terms. |
+| **Final** | Locked: edits return 409. Your LR terms at the moment of finalizing are copied onto the LR, so later changes in Settings don't alter it. |
+| **Cancelled** | Read-only. Allowed from Draft or Final, with a required reason; the LR number is never reused. |
+
+**PDF.** The LR PDF shows:
+- your company details;
+- the LR, order and trip numbers, and the status;
+- consignor and consignee;
+- vehicle, driver and driver licence (from the trip);
+- goods;
+- freight, advance and balance, and payment terms;
+- E-Way Bill numbers;
+- three signature areas.
+
+Use **View / print PDF** (opens in a new tab) or **Download PDF**; every PDF download is recorded in the LR's history.
+
+**Terms.** These are set by an admin under Settings → Transport documents. They print as "Terms and conditions set by *your company*". RaahSetu adds no legal declarations of its own, so if the field is empty, no terms are printed.
+
+**Register.** **Transport Documents**, in the sidebar for every role with `shipments:read`, lists E-Way Bills, LRs and PODs across all trips, with search and status filters. Invoices, challans and vehicle/driver documents keep their own registers, which it links to.
 
 ### Delivery challan and invoice
 These reuse the existing **Billing** module; there is no second invoice system.
@@ -280,8 +311,13 @@ Some providers charge for storage or requests, and some have free tiers; check y
 | `PUT /drivers/:id/kyc`, `POST /drivers/:id/kyc/verify` | kyc:write | `consent: true` required |
 | `GET /compliance/overview` | documents:read | |
 | `GET /compliance/check` | trips:write | `vehicleId`, `driverId`, `orderIds`, `at` |
-| `GET/POST /eway-bills`, `GET/PATCH /eway-bills/:id`, `POST /eway-bills/:id/cancel`, `POST /eway-bills/:id/files` | shipments:read / write | drivers: own trips only |
-| `GET/POST /lorry-receipts`, `GET/PATCH /lorry-receipts/:id`, `POST …/cancel`, `GET …/pdf` | shipments:read / write | |
+| `GET/POST /eway-bills` (`?status=ACTIVE|CANCELLED`), `GET/PATCH /eway-bills/:id`, `POST /eway-bills/:id/files` | shipments:read / write | drivers: own trips only; edits and files refused (409) once cancelled; at most 5 files |
+| `POST /eway-bills/:id/cancel` | shipments:write | body `{ reason }` (3–500 characters) |
+| `GET /eway-bills/:id/history` | shipments:read | the record's audit trail with user names |
+| `GET/POST /lorry-receipts` (`?status=`), `GET/PATCH /lorry-receipts/:id`, `GET …/pdf` | shipments:read / write | responses include `balanceAmount` and `editable`; PATCH refused (409) once finalized or cancelled |
+| `POST /lorry-receipts/:id/finalize` | shipments:write | locks the LR and copies the company's LR terms |
+| `POST /lorry-receipts/:id/cancel` | shipments:write | body `{ reason }` |
+| `GET /lorry-receipts/:id/history` | shipments:read | |
 | `GET /billing/:id/pdf` | billing:read | invoice or challan PDF |
 | `GET/POST /pods`, `GET/PATCH /pods/:id`, `POST /pods/:id/photos`, `GET /pods/:id/pdf` | shipments:read, pod:write | drivers: own trips only |
 | `GET /trips/:id/documents`, `GET /trips/:id/documents/pack` | shipments:read | filtered by role |
@@ -307,3 +343,9 @@ Migration `20261118120000_transport_documents_compliance` is **additive only**:
 - **New tables:** `Attachment`, `EwayBill`, `LorryReceipt` and `ProofOfDelivery`.
 
 Nothing is dropped, renamed or made stricter. Every new required column has a default. Existing documents start as `PENDING` verification, which does not block anything under the default policy.
+
+Migration `20261119120000_transport_documents_lifecycle` is also **additive only**, with nullable columns:
+- `EwayBill`: `validFrom`, `cancelledAt`, `cancelledById` and `cancelReason`.
+- `LorryReceipt`: `advanceAmount`, `finalizedAt`, `finalizedById`, `termsSnapshot`, `cancelledAt`, `cancelledById` and `cancelReason`.
+
+Existing LRs become **drafts** (no `finalizedAt`), so they stay editable until someone finalizes them. Company settings gain `transportDocuments.lrTerms`, a JSON key that defaults to empty and needs no migration.

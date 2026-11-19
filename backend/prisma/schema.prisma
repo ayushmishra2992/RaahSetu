@@ -572,6 +572,8 @@ model EwayBill {
   /// 12-digit E-Way Bill number as issued by the portal
   ewbNumber           String
   documentDate        DateTime
+  /// Validity start as shown on the portal (Part-B entry); null when only the document date is known
+  validFrom           DateTime?
   validUntil          DateTime?
   supplierName        String
   supplierGstin       String?
@@ -591,6 +593,10 @@ model EwayBill {
   status              ShipmentDocStatus @default(ACTIVE)
   notes               String?
   createdById         Int?
+  /// Set when the record is cancelled in RaahSetu (the portal cancellation is done separately)
+  cancelledAt         DateTime?
+  cancelledById       Int?
+  cancelReason        String?
 
   attachments Attachment[]
 
@@ -628,11 +634,21 @@ model LorryReceipt {
   chargedWeightKg      Float?
   /// Freight in rupees (decimal; amounts are stored as numbers like the billing module)
   freightAmount        Float?
+  /// Advance received against the freight; balance = freight - advance (computed, never negative)
+  advanceAmount        Float?
   paymentTerms         FreightPaymentTerms @default(TO_BE_BILLED)
   declaredValue        Float?
   deliveryInstructions String?
   status               ShipmentDocStatus   @default(ACTIVE)
   createdById          Int?
+  /// Finalized LRs are locked: no further edits, only cancellation
+  finalizedAt          DateTime?
+  finalizedById        Int?
+  /// Company terms copied at finalization so later settings changes do not alter an issued LR
+  termsSnapshot        String?
+  cancelledAt          DateTime?
+  cancelledById        Int?
+  cancelReason         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

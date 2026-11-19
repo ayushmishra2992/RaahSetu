@@ -539,4 +539,159 @@ describe.skipIf(!enabled)("transport documents, compliance and POD (integration)
       expect((await request(app).get(`/api/attachments/${attId}`).set(auth(A))).status).toBe(404);
     });
   });
+
+  describe("transport document lifecycle (edit, files, finalize, cancel, history)", () => {
+    it("edits an E-Way Bill, adds files later, and checks validity order", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validFrom: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic lifecycle goods" };
+      expect((await request(app).post("/api/eway-bills").set(auth(A)).send({ ...base, ewbNumber: "391000000077", validFrom: iso(3) })).status).toBe(400); // until < from
+      const r = await request(app).post("/api/eway-bills").set(auth(dispatcher)).send({ ...base, ewbNumber: "391000000077" });
+      expect(r.status).toBe(201);
+      const ewb = r.body.id as number;
+      const edit = await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(dispatcher)).send({ goodsDescription: "Synthetic goods (edited)", quantity: 12, quantityUnit: "BOX" });
+      expect(edit.status).toBe(200);
+      expect(edit.body.goodsDescription).toBe("Synthetic goods (edited)");
+      expect((await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(employee)).send({ notes: "x" })).status).toBe(403);
+      expect((await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(B)).send({ notes: "x" })).status).toBe(404);
+      const add = await request(app).post(`/api/eway-bills/${ewb}/files`).set(auth(dispatcher)).attach("file", PDF, { filename: "ewb-page2.pdf", contentType: "application/pdf" });
+      expect(add.status).toBe(201);
+      expect(add.body).toHaveLength(1);
+      const got = await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A));
+      expect(got.body.attachments).toHaveLength(1);
+      expect(got.body.validFrom).toBeTruthy();
+      id.ewbLife = ewb;
+    });
+
+    it("cancels an E-Way Bill only with a reason, then refuses edits and new files", async () => {
+      const ewb = id.ewbLife;
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(dispatcher)).send({})).status).toBe(400);
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(dispatcher)).send({ reason: "x" })).status).toBe(400);
+      const c = await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(dispatcher)).send({ reason: "Synthetic test: wrong vehicle" });
+      expect(c.status).toBe(200);
+      expect(c.body.status).toBe("CANCELLED");
+      expect(c.body.cancelReason).toBe("Synthetic test: wrong vehicle");
+      expect(c.body.cancelledAt).toBeTruthy();
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(dispatcher)).send({ reason: "again please" })).status).toBe(409);
+      expect((await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(dispatcher)).send({ notes: "late edit" })).status).toBe(409);
+      const late = await request(app).post(`/api/eway-bills/${ewb}/files`).set(auth(dispatcher)).attach("file", PDF, { filename: "late.pdf", contentType: "application/pdf" });
+      expect(late.status).toBe(409);
+      const h = await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(employee));
+      expect(h.status).toBe(200);
+      expect((h.body as Array<{ action: string }>).map((e) => e.action)).toEqual(["ewaybill.cancelled", "file.uploaded", "ewaybill.updated", "ewaybill.recorded"]);
+      expect((await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(B))).status).toBe(404);
+      expect((await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(otherDriverUser))).status).toBe(404);
+    });
+
+    it("records LR advance and balance, and rejects an advance above the freight", async () => {
+      expect((await request(app).post("/api/lorry-receipts").set(auth(dispatcher)).send({ orderId: id.order, goodsDescription: "Synthetic", advanceAmount: 100 })).status).toBe(400); // no freight
+      expect((await request(app).post("/api/lorry-receipts").set(auth(dispatcher)).send({ orderId: id.order, goodsDescription: "Synthetic", freightAmount: 1000, advanceAmount: 1500 })).status).toBe(400);
+      const lr = await request(app).post("/api/lorry-receipts").set(auth(dispatcher)).send({ orderId: id.order, goodsDescription: "Synthetic lifecycle LR", freightAmount: 5000, advanceAmount: 2000 });
+      expect(lr.status).toBe(201);
+      expect(lr.body.balanceAmount).toBe(3000);
+      expect(lr.body.editable).toBe(true);
+      id.lrLife = lr.body.id;
+      const edit = await request(app).patch(`/api/lorry-receipts/${id.lrLife}`).set(auth(dispatcher)).send({ freightAmount: 5500 });
+      expect(edit.status).toBe(200);
+      expect(edit.body.balanceAmount).toBe(3500);
+      expect((await request(app).patch(`/api/lorry-receipts/${id.lrLife}`).set(auth(dispatcher)).send({ freightAmount: 1000 })).status).toBe(400); // advance would exceed freight
+    });
+
+    it("finalizes an LR with the company's own terms and then locks it", async () => {
+      const terms = "Synthetic company terms for testing only.";
+      expect((await request(app).patch("/api/company").set(auth(A)).send({ settings: { transportDocuments: { lrTerms: terms } } })).status).toBe(200);
+      expect((await request(app).post(`/api/lorry-receipts/${id.lrLife}/finalize`).set(auth(employee))).status).toBe(403);
+      const f = await request(app).post(`/api/lorry-receipts/${id.lrLife}/finalize`).set(auth(dispatcher));
+      expect(f.status).toBe(200);
+      expect(f.body.finalizedAt).toBeTruthy();
+      expect(f.body.termsSnapshot).toBe(terms);
+      expect(f.body.editable).toBe(false);
+      expect((await request(app).post(`/api/lorry-receipts/${id.lrLife}/finalize`).set(auth(dispatcher))).status).toBe(409);
+      expect((await request(app).patch(`/api/lorry-receipts/${id.lrLife}`).set(auth(dispatcher)).send({ goodsDescription: "changed after finalize" })).status).toBe(409);
+      // Later settings changes do not alter the finalized LR.
+      expect((await request(app).patch("/api/company").set(auth(A)).send({ settings: { transportDocuments: { lrTerms: "Changed terms" } } })).status).toBe(200);
+      expect((await request(app).get(`/api/lorry-receipts/${id.lrLife}`).set(auth(A))).body.termsSnapshot).toBe(terms);
+      const pdf = await request(app).get(`/api/lorry-receipts/${id.lrLife}/pdf`).set(auth(A)).buffer(true).parse(binary);
+      expect(pdf.status).toBe(200);
+      expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe("%PDF-");
+    });
+
+    it("cancels a finalized LR only with a reason and keeps its history", async () => {
+      expect((await request(app).post(`/api/lorry-receipts/${id.lrLife}/cancel`).set(auth(dispatcher)).send({ reason: "" })).status).toBe(400);
+      expect((await request(app).post(`/api/lorry-receipts/${id.lrLife}/cancel`).set(auth(B)).send({ reason: "Not yours" })).status).toBe(404);
+      const c = await request(app).post(`/api/lorry-receipts/${id.lrLife}/cancel`).set(auth(dispatcher)).send({ reason: "Synthetic test: duplicate LR" });
+      expect(c.status).toBe(200);
+      expect(c.body.status).toBe("CANCELLED");
+      expect(c.body.cancelReason).toBe("Synthetic test: duplicate LR");
+      expect((await request(app).post(`/api/lorry-receipts/${id.lrLife}/finalize`).set(auth(dispatcher))).status).toBe(409);
+      const h = await request(app).get(`/api/lorry-receipts/${id.lrLife}/history`).set(auth(A));
+      expect((h.body as Array<{ action: string }>).map((e) => e.action)).toEqual(["lr.cancelled", "lr.pdf_downloaded", "lr.finalized", "lr.updated", "lr.created"]);
+      expect(h.body[0].metadata.reason).toBe("Synthetic test: duplicate LR");
+      const list = await request(app).get("/api/lorry-receipts?status=CANCELLED").set(auth(A));
+      expect((list.body as Array<{ id: number }>).some((l) => l.id === id.lrLife)).toBe(true);
+    });
+
+    it("lets exactly one of several simultaneous E-Way Bill cancellations succeed, with one history entry", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic race goods" };
+      const r = await request(app).post("/api/eway-bills").set(auth(dispatcher)).send({ ...base, ewbNumber: "391000000088" });
+      expect(r.status).toBe(201);
+      const ewb = r.body.id as number;
+      const results = await Promise.all(
+        Array.from({ length: 6 }, (_, i) => request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(i % 2 ? A : dispatcher)).send({ reason: `Synthetic race cancel ${i}` })),
+      );
+      const statuses = results.map((x) => x.status).sort();
+      expect(statuses.filter((st) => st === 200)).toHaveLength(1);
+      expect(statuses.filter((st) => st === 409)).toHaveLength(5);
+      const winner = results.find((x) => x.status === 200)!;
+      const stored = await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A));
+      expect(stored.body.status).toBe("CANCELLED");
+      expect(stored.body.cancelReason).toBe(winner.body.cancelReason); // the winner's reason is kept, not overwritten
+      const h = await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(A));
+      expect((h.body as Array<{ action: string }>).filter((e) => e.action === "ewaybill.cancelled")).toHaveLength(1);
+    });
+
+    it("never lets a simultaneous edit change an E-Way Bill once its cancellation has succeeded", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic before" };
+      for (let round = 0; round < 4; round++) {
+        const r = await request(app).post("/api/eway-bills").set(auth(dispatcher)).send({ ...base, ewbNumber: `39100000009${round}` });
+        expect(r.status).toBe(201);
+        const ewb = r.body.id as number;
+        const [edit, cancel] = await Promise.all([
+          request(app).patch(`/api/eway-bills/${ewb}`).set(auth(A)).send({ goodsDescription: "Synthetic after" }),
+          request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(dispatcher)).send({ reason: "Synthetic edit-vs-cancel" }),
+        ]);
+        expect(cancel.status).toBe(200); // the cancellation always succeeds (it was the only one)
+        expect([200, 409]).toContain(edit.status);
+        const stored = (await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A))).body;
+        expect(stored.status).toBe("CANCELLED");
+        const actions = ((await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(A))).body as Array<{ action: string }>).map((e) => e.action);
+        if (edit.status === 200) {
+          // The edit landed first: it is in the history BEFORE the cancellation.
+          expect(stored.goodsDescription).toBe("Synthetic after");
+          expect(actions).toEqual(["ewaybill.cancelled", "ewaybill.updated", "ewaybill.recorded"]);
+        } else {
+          // The cancellation landed first: the edit changed nothing and left no history.
+          expect(stored.goodsDescription).toBe("Synthetic before");
+          expect(actions).toEqual(["ewaybill.cancelled", "ewaybill.recorded"]);
+        }
+        // Afterwards, edits are always refused.
+        expect((await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(A)).send({ goodsDescription: "late" })).status).toBe(409);
+      }
+    });
+
+    it("keeps scoping and validation on guarded E-Way Bill updates", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic scoping" };
+      const created = await request(app).post("/api/eway-bills").set(auth(dispatcher)).send({ ...base, ewbNumber: "391000000066" });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const ewb = created.body.id as number;
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(B)).send({ reason: "Other company" })).status).toBe(404);
+      expect((await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(B)).send({ goodsDescription: "x" })).status).toBe(404);
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(employee)).send({ reason: "No permission" })).status).toBe(403);
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(driverUser)).send({ reason: "No permission" })).status).toBe(403);
+      expect((await request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(dispatcher)).send({ reason: "no" })).status).toBe(400);
+      // A duplicate number is still a conflict, not a server error.
+      expect((await request(app).patch(`/api/eway-bills/${ewb}`).set(auth(dispatcher)).send({ ewbNumber: "391000000001" })).status).toBe(409);
+      const actions = ((await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(A))).body as Array<{ action: string }>).map((e) => e.action);
+      expect(actions).toEqual(["ewaybill.recorded"]); // none of the refused requests wrote history
+      expect((await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A))).body.status).toBe("ACTIVE");
+    });
+  });
 });

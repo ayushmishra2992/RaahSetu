@@ -1,14 +1,16 @@
 "use client";
 
-import { Download, FilePlus2, FileSignature, FileText, FolderArchive, Paperclip, ReceiptText, ShieldAlert, ShieldCheck, Truck } from "lucide-react";
+import { ChevronRight, Download, FilePlus2, FileSignature, FileText, FolderArchive, Paperclip, ReceiptText, ShieldAlert, ShieldCheck, Truck } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { ApiError, errorMessage } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, humanize } from "@/lib/format";
 import type { PodStatus, TripDocuments as Docs } from "@/lib/types";
 import { openAttachment, PHOTO_MIME, uploadWithProgress } from "@/lib/upload";
 import { useApi } from "@/lib/useApi";
 import { useAuth } from "./AuthProvider";
 import { FileCapture, UploadProgress, type PickedFile } from "./FileCapture";
+import { EwayBillForm, LrForm } from "./transport/TransportDocForms";
 import { FormShell } from "./forms";
 import { SignaturePad } from "./SignaturePad";
 import { Alert, Badge, Button, Card, Field, Input, Loading, Modal, Select, StatusBadge, Textarea, useToast } from "./ds";
@@ -114,7 +116,10 @@ function OrderPanel({ o, tripId, tripStatus, shipment, onChanged }: { o: OrderDo
           {o.ewayBills.map((e) => (
             <div key={e.id} className="rounded-md border border-line p-2 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium tabular">{e.ewbNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}</span>
+                <Link href={`/transport-documents/eway-bills/${e.id}`} className="inline-flex items-center gap-0.5 font-medium tabular text-brand-700 hover:underline" aria-label={`E-Way Bill ${e.ewbNumber}: details`}>
+                  {e.ewbNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}
+                  <ChevronRight size={13} aria-hidden />
+                </Link>
                 <StatusBadge status={e.status === "CANCELLED" ? "CANCELLED" : e.expired ? "EXPIRED" : "VALID"} />
               </div>
               <p className="text-xs text-muted">
@@ -143,9 +148,12 @@ function OrderPanel({ o, tripId, tripStatus, shipment, onChanged }: { o: OrderDo
           {o.lorryReceipts.length === 0 && <p className="text-xs text-muted">No LR issued yet.</p>}
           {o.lorryReceipts.map((l) => (
             <div key={l.id} className="flex items-center justify-between gap-2 rounded-md border border-line p-2 text-sm">
-              <span className="font-medium">{l.lrNumber}</span>
+              <Link href={`/transport-documents/lorry-receipts/${l.id}`} className="inline-flex items-center gap-0.5 font-medium text-brand-700 hover:underline" aria-label={`Lorry receipt ${l.lrNumber}: details`}>
+                {l.lrNumber}
+                <ChevronRight size={13} aria-hidden />
+              </Link>
               <span className="flex items-center gap-2">
-                <StatusBadge status={l.status} />
+                {l.status === "CANCELLED" ? <StatusBadge status="CANCELLED" /> : l.finalizedAt ? <Badge color="green">Final</Badge> : <Badge color="gray">Draft</Badge>}
                 <a className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" href={`/api/lorry-receipts/${l.id}/pdf`} target="_blank" rel="noopener">
                   <Download size={12} aria-hidden /> PDF
                 </a>
@@ -194,10 +202,10 @@ function OrderPanel({ o, tripId, tripStatus, shipment, onChanged }: { o: OrderDo
       </div>
 
       <Modal open={dialog === "ewb"} title={`E-Way Bill · ${o.orderNumber}`} onClose={() => setDialog(null)} wide>
-        {dialog === "ewb" && <EwayBillForm o={o} tripId={tripId} onSaved={() => { setDialog(null); toast.success("E-Way Bill recorded"); onChanged(); }} />}
+        {dialog === "ewb" && <EwayBillForm seed={{ orderId: o.id, tripId, recipientName: o.customerName, placeOfDelivery: o.dropLocation, taxableValue: o.declaredValue }} onSaved={() => { setDialog(null); toast.success("E-Way Bill recorded"); onChanged(); }} />}
       </Modal>
       <Modal open={dialog === "lr"} title={`Lorry receipt · ${o.orderNumber}`} onClose={() => setDialog(null)} wide>
-        {dialog === "lr" && <LrForm o={o} tripId={tripId} onSaved={() => { setDialog(null); toast.success("Lorry receipt issued"); onChanged(); }} />}
+        {dialog === "lr" && <LrForm seed={{ orderId: o.id, tripId, weightKg: o.weightKg }} onSaved={() => { setDialog(null); toast.success("Lorry receipt issued"); onChanged(); }} />}
       </Modal>
       <Modal open={dialog === "pod"} title={`Proof of delivery · ${o.orderNumber}`} onClose={() => setDialog(null)} wide>
         {dialog === "pod" && <PodForm o={o} tripId={tripId} onSaved={(message) => { setDialog(null); toast.success(message ?? "Delivery recorded"); onChanged(); }} />}
@@ -210,172 +218,6 @@ function useForm<T extends Record<string, string>>(init: T) {
   const [f, setF] = useState(init);
   const set = (k: keyof T) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
   return [f, set, setF] as const;
-}
-
-function EwayBillForm({ o, tripId, onSaved }: { o: OrderDocs; tripId: number; onSaved: () => void }) {
-  const [f, set] = useForm({
-    ewbNumber: "",
-    documentDate: new Date().toISOString().slice(0, 10),
-    validUntil: "",
-    supplierName: "",
-    supplierGstin: "",
-    recipientName: o.customerName,
-    recipientGstin: "",
-    placeOfDispatch: "",
-    placeOfDelivery: o.dropLocation,
-    goodsDescription: "",
-    hsnCode: "",
-    quantity: "",
-    quantityUnit: "",
-    taxableValue: o.declaredValue != null ? String(o.declaredValue) : "",
-    invoiceOrChallanRef: "",
-    transporterId: "",
-    vehicleNumber: "",
-    transportDocNumber: "",
-  });
-  const [files, setFiles] = useState<PickedFile[]>([]);
-  const [progress, setProgress] = useState<number | null>(null);
-  return (
-    <FormShell
-      submitLabel="Save E-Way Bill"
-      onSubmit={async () => {
-        const digits = f.ewbNumber.replace(/\s+/g, "");
-        if (!/^\d{12}$/.test(digits)) throw new Error("The E-Way Bill number has 12 digits.");
-        if (f.validUntil && f.validUntil < f.documentDate) throw new Error("Valid-until cannot be before the document date.");
-        const form = new FormData();
-        form.set("orderId", String(o.id));
-        form.set("tripId", String(tripId));
-        for (const [k, v] of Object.entries(f)) if (v.trim()) form.set(k, k === "documentDate" ? new Date(`${v}T00:00:00`).toISOString() : k === "validUntil" ? new Date(`${v}T23:59:59`).toISOString() : v.trim());
-        for (const p of files) form.append("file", p.file, p.file.name);
-        setProgress(0);
-        try {
-          await uploadWithProgress("/eway-bills", form, setProgress);
-        } finally {
-          setProgress(null);
-        }
-        onSaved();
-      }}
-    >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="E-Way Bill number (12 digits)" required>
-          <Input required inputMode="numeric" value={f.ewbNumber} onChange={set("ewbNumber")} placeholder="3910 1234 5678" />
-        </Field>
-        <Field label="Vehicle number on the E-Way Bill">
-          <Input value={f.vehicleNumber} onChange={set("vehicleNumber")} autoCapitalize="characters" />
-        </Field>
-        <Field label="Document date" required>
-          <Input type="date" required value={f.documentDate} onChange={set("documentDate")} />
-        </Field>
-        <Field label="Valid until">
-          <Input type="date" value={f.validUntil} onChange={set("validUntil")} />
-        </Field>
-        <Field label="Supplier" required>
-          <Input required value={f.supplierName} onChange={set("supplierName")} />
-        </Field>
-        <Field label="Supplier GSTIN">
-          <Input value={f.supplierGstin} onChange={set("supplierGstin")} autoCapitalize="characters" maxLength={15} />
-        </Field>
-        <Field label="Recipient" required>
-          <Input required value={f.recipientName} onChange={set("recipientName")} />
-        </Field>
-        <Field label="Recipient GSTIN">
-          <Input value={f.recipientGstin} onChange={set("recipientGstin")} autoCapitalize="characters" maxLength={15} />
-        </Field>
-        <Field label="Place of dispatch" required>
-          <Input required value={f.placeOfDispatch} onChange={set("placeOfDispatch")} />
-        </Field>
-        <Field label="Place of delivery" required>
-          <Input required value={f.placeOfDelivery} onChange={set("placeOfDelivery")} />
-        </Field>
-        <Field label="Goods description" required className="sm:col-span-2">
-          <Input required value={f.goodsDescription} onChange={set("goodsDescription")} />
-        </Field>
-        <Field label="HSN code">
-          <Input inputMode="numeric" value={f.hsnCode} onChange={set("hsnCode")} maxLength={8} />
-        </Field>
-        <Field label="Taxable value (₹)">
-          <Input type="number" min={0} step="0.01" value={f.taxableValue} onChange={set("taxableValue")} />
-        </Field>
-        <Field label="Quantity">
-          <Input type="number" min={0} step="any" value={f.quantity} onChange={set("quantity")} />
-        </Field>
-        <Field label="Unit">
-          <Input value={f.quantityUnit} onChange={set("quantityUnit")} placeholder="nos, kg, boxes" />
-        </Field>
-        <Field label="Invoice / challan no.">
-          <Input value={f.invoiceOrChallanRef} onChange={set("invoiceOrChallanRef")} />
-        </Field>
-        <Field label="Transporter ID">
-          <Input value={f.transporterId} onChange={set("transporterId")} autoCapitalize="characters" maxLength={15} />
-        </Field>
-        <Field label="Transport document / LR no.">
-          <Input value={f.transportDocNumber} onChange={set("transportDocNumber")} />
-        </Field>
-      </div>
-      <FileCapture label="E-Way Bill copy" value={files} onChange={setFiles} max={3} hint="The PDF from the portal, or a photo of the printout" />
-      <UploadProgress fraction={progress} />
-    </FormShell>
-  );
-}
-
-function LrForm({ o, tripId, onSaved }: { o: OrderDocs; tripId: number; onSaved: () => void }) {
-  const [f, set] = useForm({ goodsDescription: "", packages: "", packageType: "", chargedWeightKg: "", freightAmount: "", paymentTerms: "TO_BE_BILLED", consigneeGstin: "", consignorGstin: "", deliveryInstructions: "" });
-  return (
-    <FormShell
-      submitLabel="Issue lorry receipt"
-      onSubmit={async () => {
-        const num = (v: string) => (v ? Number(v) : null);
-        await api("/lorry-receipts", {
-          body: {
-            orderId: o.id,
-            tripId,
-            goodsDescription: f.goodsDescription,
-            packages: num(f.packages),
-            packageType: f.packageType || null,
-            chargedWeightKg: num(f.chargedWeightKg),
-            freightAmount: num(f.freightAmount),
-            paymentTerms: f.paymentTerms,
-            consigneeGstin: f.consigneeGstin || null,
-            consignorGstin: f.consignorGstin || null,
-            deliveryInstructions: f.deliveryInstructions || null,
-          },
-        });
-        onSaved();
-      }}
-    >
-      <p className="text-sm text-muted">Consignor, consignee, route, weight and declared value are filled from the order; vehicle and driver from the trip.</p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Goods description" required className="sm:col-span-2">
-          <Input required value={f.goodsDescription} onChange={set("goodsDescription")} />
-        </Field>
-        <Field label="Packages">
-          <Input type="number" min={1} inputMode="numeric" value={f.packages} onChange={set("packages")} />
-        </Field>
-        <Field label="Package type">
-          <Input value={f.packageType} onChange={set("packageType")} placeholder="cartons, bags, pallets" />
-        </Field>
-        <Field label="Charged weight (kg)" hint={`Actual: ${fmtNum(o.weightKg, "kg")}`}>
-          <Input type="number" min={0} value={f.chargedWeightKg} onChange={set("chargedWeightKg")} />
-        </Field>
-        <Field label="Freight (₹)">
-          <Input type="number" min={0} step="0.01" value={f.freightAmount} onChange={set("freightAmount")} />
-        </Field>
-        <Field label="Payment terms">
-          <Select value={f.paymentTerms} onChange={set("paymentTerms")}>
-            <option value="PAID">Paid</option>
-            <option value="TO_PAY">To pay (consignee pays)</option>
-            <option value="TO_BE_BILLED">To be billed</option>
-          </Select>
-        </Field>
-        <Field label="Consignee GSTIN">
-          <Input value={f.consigneeGstin} onChange={set("consigneeGstin")} autoCapitalize="characters" maxLength={15} />
-        </Field>
-        <Field label="Delivery instructions" className="sm:col-span-2">
-          <Textarea rows={2} value={f.deliveryInstructions} onChange={set("deliveryInstructions")} />
-        </Field>
-      </div>
-    </FormShell>
-  );
 }
 
 const POD_STATUSES: Array<[PodStatus, string]> = [

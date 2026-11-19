@@ -28,13 +28,13 @@ async function loadAll(companyId: number, tripId: number) {
       stops: { orderBy: { sequence: "asc" }, include: { order: { select: { id: true, orderNumber: true, customerName: true, declaredValue: true, weightKg: true } }, location: { select: { name: true } } } },
       billingDocuments: { select: { id: true, kind: true, number: true, status: true, total: true } },
       pods: { include: { attachments: true, order: { select: { orderNumber: true } } } },
-      lorryReceipts: { select: { id: true, lrNumber: true, status: true, orderId: true } },
+      lorryReceipts: { select: { id: true, lrNumber: true, status: true, orderId: true, finalizedAt: true } },
     },
   });
   const orderIds = [...new Set(trip.stops.map((s) => s.orderId).filter((x): x is number => x != null))];
   const [ewayBills, orderLrs] = await Promise.all([
     prisma.ewayBill.findMany({ where: { companyId, orderId: { in: orderIds } }, include: { attachments: true } }),
-    prisma.lorryReceipt.findMany({ where: { companyId, orderId: { in: orderIds } }, select: { id: true, lrNumber: true, status: true, orderId: true } }),
+    prisma.lorryReceipt.findMany({ where: { companyId, orderId: { in: orderIds } }, select: { id: true, lrNumber: true, status: true, orderId: true, finalizedAt: true } }),
   ]);
   const lrs = [...new Map([...trip.lorryReceipts, ...orderLrs].map((l) => [l.id, l])).values()];
   return { trip, orderIds, ewayBills, lrs };

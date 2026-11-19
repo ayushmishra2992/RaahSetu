@@ -73,6 +73,9 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
       "/api/greenfleet/summary": () => F.greenSummary,
       "/api/fuel-records": () => F.fuelRecords,
       "/api/compliance/overview": () => F.complianceOverview,
+      "/api/eway-bills": () => F.ewayBills,
+      "/api/lorry-receipts": () => F.lorryReceipts,
+      "/api/pods": () => F.pods,
       "/api/places/status": () => F.placesStatus,
       "/api/places/reverse": () => F.reverseFor(Number(q.get("lat")), Number(q.get("lng"))),
       "/api/places/autocomplete": () => {
@@ -85,6 +88,15 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
       return { body: { found: true, distanceKm: 37, minutes: 49, nodeIds: [1, 2, 3, 4], edgeIds: [1, 2, 3], nodeNames: ["Bhiwandi Jn", "Thane Jn", "Airoli Jn", "Vashi Jn"], comparison: { astar: { expandedNodes: 4, runtimeMs: 0.12 }, dijkstra: { expandedNodes: 6, runtimeMs: 0.2 } } } };
     if (/^\/api\/trips\/\d+\/qr$/.test(path) || /^\/api\/billing\/\d+\/qr$/.test(path)) return { body: { url: "http://localhost:3000/verify/fixture-token", dataUrl: F.TINY_PNG } };
     if (/^\/api\/trips\/\d+\/documents$/.test(path)) return { body: F.tripDocuments };
+    if (/^\/api\/(eway-bills|lorry-receipts)\/\d+\/history$/.test(path)) return { body: F.docHistory };
+    if (/^\/api\/eway-bills\/\d+$/.test(path)) {
+      const e = F.ewayBills.find((x) => x.id === id);
+      return e ? { body: e } : { status: 404, body: { error: { message: "E-Way Bill not found" } } };
+    }
+    if (/^\/api\/lorry-receipts\/\d+$/.test(path)) {
+      const l = F.lorryReceipts.find((x) => x.id === id);
+      return l ? { body: l } : { status: 404, body: { error: { message: "Lorry receipt not found" } } };
+    }
     if (/^\/api\/trips\/\d+$/.test(path)) return { body: { ...F.trip, id } };
     if (/^\/api\/optiroute\/runs\/\d+$/.test(path)) return { body: { ...F.run, id } };
     if (/^\/api\/orders\/\d+$/.test(path)) {

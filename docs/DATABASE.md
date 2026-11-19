@@ -107,6 +107,7 @@ Committed SQL migrations in `backend/prisma/migrations/`, applied in order:
 | `20261019120000_raahsetu_v2` | Fleet operations, OptiRoute runs, scenarios, billing, GreenFleet, audit |
 | `20261113120000_location_place_details` | Additive: `CoordSource` enum and optional location-search columns on `Location` (`city`, `state`, `postalCode`, `country`, `placeProvider`, `providerPlaceId`, `coordsSource` with default `MANUAL`) |
 | `20261118120000_transport_documents_compliance` | Additive: new `DocumentType` values, verification/KYC/ownership columns, HSN and challan fields, and the `Attachment`, `EwayBill`, `LorryReceipt` and `ProofOfDelivery` tables (details in [DOCUMENTS_AND_COMPLIANCE.md](DOCUMENTS_AND_COMPLIANCE.md#10-database-changes)) |
+| `20261119120000_transport_documents_lifecycle` | Additive, nullable columns only: E-Way Bill valid-from and cancellation details; LR advance, finalization, terms snapshot and cancellation details |
 
 ### Commands
 
