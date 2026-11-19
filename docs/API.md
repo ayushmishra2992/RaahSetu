@@ -153,3 +153,7 @@ Server-side proxy to the configured provider (`PLACES_PROVIDER`); the API key ne
 |---|---|---|
 | `GET /control-tower` | dashboard:read | Counts, KPIs, alerts, active trips with simulated positions, recent runs |
 | `GET /audit` | audit:read | `?entityType=&entityId=&limit=` |
+
+## Documents, compliance and shipment paperwork
+
+The endpoints added for vehicle/driver documents, KYC, the compliance engine, E-Way Bills, lorry receipts, invoice/challan PDFs, proof of delivery and trip document packs — with permissions and rules — are listed in [DOCUMENTS_AND_COMPLIANCE.md § API summary](DOCUMENTS_AND_COMPLIANCE.md#9-api-summary).

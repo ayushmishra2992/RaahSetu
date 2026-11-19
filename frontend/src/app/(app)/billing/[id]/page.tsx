@@ -1,7 +1,7 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { ArrowLeft, CheckCircle2, Pencil, Printer, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Download, Pencil, Printer, Send } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -93,6 +93,9 @@ export default function BillingDocPage() {
               Cancel
             </ConfirmButton>
           )}
+          <a className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-canvas" href={`/api/billing/${id}/pdf`} target="_blank" rel="noopener">
+            <Download size={15} aria-hidden /> PDF
+          </a>
           <Button variant="secondary" icon={Printer} onClick={() => window.print()}>
             Print
           </Button>

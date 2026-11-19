@@ -59,6 +59,53 @@ enum DocumentType {
   PERMIT
   DRIVING_LICENSE
   OTHER
+  /// State permit, where a vehicle holds one separately from its national permit
+  STATE_PERMIT
+  FASTAG
+  DRIVER_PHOTO
+  /// Identity/KYC proof; only masked identifiers are ever stored (see Driver.kycIdLast4)
+  KYC_ID
+}
+
+/// Manual verification of an uploaded document by an authorised user.
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+/// What an uploaded file belongs to and which side/page it is.
+enum AttachmentRole {
+  FRONT
+  BACK
+  PAGE
+  PHOTO
+  SIGNATURE
+}
+
+enum OwnershipType {
+  OWNED
+  LEASED
+  ATTACHED
+}
+
+enum PodStatus {
+  DELIVERED
+  PARTIALLY_DELIVERED
+  FAILED
+  RETURNED
+  DISPUTED
+}
+
+enum FreightPaymentTerms {
+  PAID
+  TO_PAY
+  TO_BE_BILLED
+}
+
+enum ShipmentDocStatus {
+  ACTIVE
+  CANCELLED
 }
 
 enum LocationType {
@@ -164,20 +211,24 @@ model Company {
   /// GreenFleet / cost assumptions (validated by zod, see src/modules/settings)
   settings  Json    @default("{}")
 
-  users              User[]
-  vehicles           Vehicle[]
-  drivers            Driver[]
-  documents          ComplianceDocument[]
-  locations          Location[]
-  roadNodes          RoadNode[]
-  roadEdges          RoadEdge[]
-  orders             Order[]
-  trips              Trip[]
-  optimizationRuns   OptimizationRun[]
-  scenarios          Scenario[]
-  billingDocuments   BillingDocument[]
-  fuelRecords        FuelRecord[]
-  auditEvents        AuditEvent[]
+  users            User[]
+  vehicles         Vehicle[]
+  drivers          Driver[]
+  documents        ComplianceDocument[]
+  locations        Location[]
+  roadNodes        RoadNode[]
+  roadEdges        RoadEdge[]
+  orders           Order[]
+  trips            Trip[]
+  optimizationRuns OptimizationRun[]
+  scenarios        Scenario[]
+  billingDocuments BillingDocument[]
+  fuelRecords      FuelRecord[]
+  auditEvents      AuditEvent[]
+  attachments      Attachment[]
+  ewayBills        EwayBill[]
+  lorryReceipts    LorryReceipt[]
+  pods             ProofOfDelivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -223,6 +274,14 @@ model Vehicle {
   odometerKm         Int           @default(0)
   depotLocationId    Int?
   depotLocation      Location?     @relation("VehicleDepot", fields: [depotLocationId], references: [id], onDelete: SetNull)
+  /// State/UT of registration (from the RC), e.g. "Haryana"
+  registrationState  String?
+  ownershipType      OwnershipType @default(OWNED)
+  /// Registered owner when the vehicle is leased or attached (not owned by the company)
+  ownerName          String?
+  ownerPhone         String?
+  /// FASTag account details (the tag document itself is a FASTAG ComplianceDocument)
+  fastagId           String?
 
   documents   ComplianceDocument[]
   trips       Trip[]
@@ -247,6 +306,20 @@ model Driver {
   maxShiftHours Float        @default(10)
   userId        Int?         @unique
   user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// Licence class / vehicle categories, e.g. "LMV, HGMV, TRANS"
+  licenseClass          String?
+  licenseIssuedOn       DateTime?
+  address               String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  /// Privacy-first KYC: never a full Aadhaar or ID number — only the ID kind
+  /// and its last 4 characters, plus when and by whom the driver's consent was recorded.
+  kycIdType             String?
+  kycIdLast4            String?
+  kycConsentAt          DateTime?
+  kycConsentById        Int?
+  kycVerification       VerificationStatus @default(PENDING)
 
   documents ComplianceDocument[]
   trips     Trip[]
@@ -273,15 +346,54 @@ model ComplianceDocument {
   driver         Driver?      @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   /// Uploaded file metadata. Files live in a private directory (UPLOAD_DIR), never served statically.
-  fileName       String?
-  fileMimeType   String?
-  fileSizeBytes  Int?
-  storageKey     String?      @unique
+  fileName      String?
+  fileMimeType  String?
+  fileSizeBytes Int?
+  storageKey    String? @unique
+
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verifiedById       Int?
+  rejectionReason    String?
+
+  /// Additional files (licence front/back, multi-page scans). The legacy single
+  /// file above is still served for documents uploaded before attachments existed.
+  attachments Attachment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([companyId, expiresOn])
+}
+
+/// A private uploaded file. Exactly one owner reference is set. Files live in the
+/// configured storage driver under a random key; they are never served publicly.
+model Attachment {
+  id            Int            @id @default(autoincrement())
+  companyId     Int
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role          AttachmentRole @default(PAGE)
+  fileName      String
+  fileMimeType  String
+  fileSizeBytes Int
+  storageKey    String         @unique
+  /// SHA-256 of the stored bytes, for integrity checks and duplicate detection
+  sha256        String
+  uploadedById  Int?
+
+  complianceDocumentId Int?
+  complianceDocument   ComplianceDocument? @relation(fields: [complianceDocumentId], references: [id], onDelete: Cascade)
+  ewayBillId           Int?
+  ewayBill             EwayBill?           @relation(fields: [ewayBillId], references: [id], onDelete: Cascade)
+  podId                Int?
+  pod                  ProofOfDelivery?    @relation(fields: [podId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([complianceDocumentId])
+  @@index([ewayBillId])
+  @@index([podId])
 }
 
 // ───────────────────────────── Geography ─────────────────────────────
@@ -308,7 +420,7 @@ model Location {
   placeProvider   String?
   /// That provider's opaque place id (not unique; providers may reuse or change ids)
   providerPlaceId String?
-  coordsSource    CoordSource  @default(MANUAL)
+  coordsSource    CoordSource @default(MANUAL)
 
   vehiclesAtDepot Vehicle[]  @relation("VehicleDepot")
   pickupOrders    Order[]    @relation("OrderPickup")
@@ -377,7 +489,10 @@ model Order {
   notes            String?
   declaredValue    Float?
 
-  tripStops TripStop[]
+  tripStops     TripStop[]
+  ewayBills     EwayBill[]
+  lorryReceipts LorryReceipt[]
+  pods          ProofOfDelivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -387,15 +502,15 @@ model Order {
 }
 
 model Trip {
-  id                Int        @id @default(autoincrement())
+  id                Int              @id @default(autoincrement())
   companyId         Int
-  company           Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   tripNumber        String
   vehicleId         Int
-  vehicle           Vehicle    @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  vehicle           Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
   driverId          Int
-  driver            Driver     @relation(fields: [driverId], references: [id], onDelete: Restrict)
-  status            TripStatus @default(PLANNED)
+  driver            Driver           @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  status            TripStatus       @default(PLANNED)
   plannedStart      DateTime
   plannedEnd        DateTime?
   actualStart       DateTime?
@@ -406,12 +521,15 @@ model Trip {
   estCo2Kg          Float?
   optimizationRunId Int?
   optimizationRun   OptimizationRun? @relation(fields: [optimizationRunId], references: [id], onDelete: SetNull)
-  verificationToken String     @unique
+  verificationToken String           @unique
   notes             String?
 
   stops            TripStop[]
   events           TripEvent[]
   billingDocuments BillingDocument[]
+  ewayBills        EwayBill[]
+  lorryReceipts    LorryReceipt[]
+  pods             ProofOfDelivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -434,7 +552,125 @@ model TripStop {
   actualArrival  DateTime?
   status         StopStatus @default(PENDING)
 
+  pod ProofOfDelivery?
+
   @@unique([tripId, sequence])
+}
+
+// ───────────────────────────── Shipment documents ─────────────────────────────
+
+/// E-Way Bill details recorded by the transporter. RaahSetu does NOT generate
+/// E-Way Bills or talk to the government portal; it records and attaches them.
+model EwayBill {
+  id                  Int               @id @default(autoincrement())
+  companyId           Int
+  company             Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orderId             Int
+  order               Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tripId              Int?
+  trip                Trip?             @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  /// 12-digit E-Way Bill number as issued by the portal
+  ewbNumber           String
+  documentDate        DateTime
+  validUntil          DateTime?
+  supplierName        String
+  supplierGstin       String?
+  recipientName       String
+  recipientGstin      String?
+  placeOfDispatch     String
+  placeOfDelivery     String
+  goodsDescription    String
+  hsnCode             String?
+  quantity            Float?
+  quantityUnit        String?
+  taxableValue        Float?
+  invoiceOrChallanRef String?
+  transporterId       String?
+  vehicleNumber       String?
+  transportDocNumber  String?
+  status              ShipmentDocStatus @default(ACTIVE)
+  notes               String?
+  createdById         Int?
+
+  attachments Attachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, ewbNumber])
+  @@index([companyId, orderId])
+  @@index([companyId, validUntil])
+}
+
+/// Lorry Receipt (LR / bilty / consignment note) issued by the transporter.
+model LorryReceipt {
+  id                   Int                 @id @default(autoincrement())
+  companyId            Int
+  company              Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lrNumber             String
+  orderId              Int
+  order                Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tripId               Int?
+  trip                 Trip?               @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  bookingDate          DateTime
+  consignorName        String
+  consignorAddress     String?
+  consignorGstin       String?
+  consigneeName        String
+  consigneeAddress     String?
+  consigneeGstin       String?
+  fromPlace            String
+  toPlace              String
+  goodsDescription     String
+  packages             Int?
+  packageType          String?
+  actualWeightKg       Float?
+  chargedWeightKg      Float?
+  /// Freight in rupees (decimal; amounts are stored as numbers like the billing module)
+  freightAmount        Float?
+  paymentTerms         FreightPaymentTerms @default(TO_BE_BILLED)
+  declaredValue        Float?
+  deliveryInstructions String?
+  status               ShipmentDocStatus   @default(ACTIVE)
+  createdById          Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, lrNumber])
+  @@index([companyId, orderId])
+}
+
+/// Proof of delivery for one DROP stop of a trip.
+model ProofOfDelivery {
+  id                Int       @id @default(autoincrement())
+  companyId         Int
+  company           Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tripId            Int
+  trip              Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripStopId        Int       @unique
+  tripStop          TripStop  @relation(fields: [tripStopId], references: [id], onDelete: Cascade)
+  orderId           Int?
+  order             Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  status            PodStatus
+  receiverName      String
+  receiverPhone     String?
+  deliveredAt       DateTime
+  /// Same unit as the order (kg)
+  deliveredQuantity Float?
+  shortageDetails   String?
+  damageDetails     String?
+  remarks           String?
+  recordedById      Int?
+  /// Public verification link for the printed POD (same scheme as trips/invoices)
+  verificationToken String    @unique
+
+  attachments Attachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, tripId])
 }
 
 model TripEvent {
@@ -453,27 +689,27 @@ model TripEvent {
 // ───────────────────────────── OptiRoute & scenarios ─────────────────────────────
 
 model OptimizationRun {
-  id            Int                   @id @default(autoincrement())
-  companyId     Int
-  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdById   Int?
-  name          String?
-  algorithm     OptimizationAlgorithm
-  status        OptimizationStatus
-  seed          Int
+  id              Int                   @id @default(autoincrement())
+  companyId       Int
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById     Int?
+  name            String?
+  algorithm       OptimizationAlgorithm
+  status          OptimizationStatus
+  seed            Int
   /// Normalised request (weights, constraints, order/vehicle ids, overrides)
-  request       Json
+  request         Json
   /// Full result: routes, unserved orders, violations, objective breakdown
-  result        Json
-  objective     Float?
-  feasible      Boolean
+  result          Json
+  objective       Float?
+  feasible        Boolean
   totalDistanceKm Float?
-  totalCo2Kg    Float?
-  totalCost     Float?
-  unservedCount Int                   @default(0)
-  runtimeMs     Int
-  distanceSource String
-  dispatchedAt  DateTime?
+  totalCo2Kg      Float?
+  totalCost       Float?
+  unservedCount   Int                   @default(0)
+  runtimeMs       Int
+  distanceSource  String
+  dispatchedAt    DateTime?
 
   trips            Trip[]
   baseForScenarios Scenario[] @relation("ScenarioBaseRun")
@@ -485,15 +721,15 @@ model OptimizationRun {
 }
 
 model Scenario {
-  id           Int            @id @default(autoincrement())
+  id           Int              @id @default(autoincrement())
   companyId    Int
-  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name         String
   type         ScenarioType
   params       Json
-  status       ScenarioStatus @default(EVALUATED)
+  status       ScenarioStatus   @default(EVALUATED)
   baseRunId    Int
-  baseRun      OptimizationRun @relation("ScenarioBaseRun", fields: [baseRunId], references: [id], onDelete: Cascade)
+  baseRun      OptimizationRun  @relation("ScenarioBaseRun", fields: [baseRunId], references: [id], onDelete: Cascade)
   resultRunId  Int?
   resultRun    OptimizationRun? @relation("ScenarioResultRun", fields: [resultRunId], references: [id], onDelete: SetNull)
   comparison   Json?
@@ -511,26 +747,30 @@ model Scenario {
 // ───────────────────────────── Billing & verification ─────────────────────────────
 
 model BillingDocument {
-  id                Int                 @id @default(autoincrement())
-  companyId         Int
-  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  kind              BillingDocumentKind @default(INVOICE)
-  number            String
-  status            BillingStatus       @default(DRAFT)
-  tripId            Int?
-  trip              Trip?               @relation(fields: [tripId], references: [id], onDelete: SetNull)
-  customerName      String
-  customerGstin     String?
-  customerAddress   String?
+  id                 Int                 @id @default(autoincrement())
+  companyId          Int
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind               BillingDocumentKind @default(INVOICE)
+  number             String
+  status             BillingStatus       @default(DRAFT)
+  tripId             Int?
+  trip               Trip?               @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  customerName       String
+  customerGstin      String?
+  customerAddress    String?
   /// GST % applied to subtotal (0 for challans)
-  taxRatePercent    Float               @default(0)
-  subtotal          Float               @default(0)
-  taxAmount         Float               @default(0)
-  total             Float               @default(0)
-  issuedAt          DateTime?
-  dueDate           DateTime?
-  notes             String?
-  verificationToken String              @unique
+  taxRatePercent     Float               @default(0)
+  subtotal           Float               @default(0)
+  taxAmount          Float               @default(0)
+  total              Float               @default(0)
+  issuedAt           DateTime?
+  dueDate            DateTime?
+  notes              String?
+  verificationToken  String              @unique
+  /// Delivery challans: why the goods move (e.g. "Job work", "Supply on approval")
+  reasonForTransport String?
+  /// Free-text references (PO, E-Way Bill, LR numbers)
+  referenceDocuments String?
 
   items BillingItem[]
 
@@ -546,6 +786,7 @@ model BillingItem {
   documentId  Int
   document    BillingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   description String
+  hsnCode     String?
   quantity    Float
   unit        String          @default("nos")
   rate        Float

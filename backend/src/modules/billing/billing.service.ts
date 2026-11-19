@@ -2,6 +2,7 @@ import { round } from "../../lib/numbering";
 
 export interface LineItemInput {
   description: string;
+  hsnCode?: string | null;
   quantity: number;
   unit?: string;
   rate: number;

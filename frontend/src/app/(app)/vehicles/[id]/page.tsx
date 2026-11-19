@@ -5,15 +5,16 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { ComplianceList } from "@/components/ComplianceList";
+import { ComplianceList, ComplianceSummary } from "@/components/ComplianceList";
 import { VehicleForm } from "@/components/forms";
 import { Alert, Badge, Button, Card, ConfirmButton, ErrorState, Loading, Modal, PageHeader, Stat, StatusBadge, Table, Td, useToast } from "@/components/ds";
 import { api, errorMessage } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, FUEL_UNIT, humanize } from "@/lib/format";
-import type { ComplianceDoc, Trip, Vehicle } from "@/lib/types";
+import type { ComplianceDoc, EntityCompliance, Trip, Vehicle } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
 type VehicleDetail = Vehicle & {
+  compliance?: EntityCompliance;
   documents: ComplianceDoc[];
   trips: Array<Trip & { driver: { id: number; name: string } }>;
   fuelRecords: Array<{ id: number; filledAt: string; quantity: number; totalCost: number; odometerKm: number }>;
@@ -37,7 +38,7 @@ export default function VehicleDetailPage() {
     <div className="space-y-5">
       <PageHeader
         title={v.registrationNumber}
-        subtitle={`${humanize(v.type)}${[v.make, v.model, v.year].some(Boolean) ? ` · ${[v.make, v.model, v.year].filter(Boolean).join(" ")}` : ""}`}
+        subtitle={`${humanize(v.type)}${v.registrationState ? ` · ${v.registrationState}` : ""}${v.ownershipType && v.ownershipType !== "OWNED" ? ` · ${humanize(v.ownershipType)}${v.ownerName ? ` (${v.ownerName})` : ""}` : ""}${[v.make, v.model, v.year].some(Boolean) ? ` · ${[v.make, v.model, v.year].filter(Boolean).join(" ")}` : ""}`}
         meta={
           <>
             <StatusBadge status={v.status} />
@@ -84,7 +85,8 @@ export default function VehicleDetailPage() {
         <Stat label="Home depot" icon={MapPin} value={v.depotLocation?.name ?? "Not set"} hint={v.depotLocation ? "Routes start here" : "Required for planning"} />
       </section>
 
-      <ComplianceList docs={v.documents} owner={{ vehicleId: v.id }} />
+      {v.compliance && <ComplianceSummary compliance={v.compliance} subject={v.registrationNumber} />}
+      <ComplianceList docs={v.documents} owner={{ vehicleId: v.id, label: v.registrationNumber }} onChanged={reload} />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card title="Recent trips" icon={Navigation}>

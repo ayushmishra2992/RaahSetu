@@ -8,6 +8,17 @@ export interface Settings {
   defaultWeights: Weights;
   documentExpiryAlertDays: number;
   currency: string;
+  /** Optional so older API responses (and test fixtures) without it still type-check. */
+  compliance?: CompliancePolicy;
+}
+
+export interface CompliancePolicy {
+  vehicleRequirements: Array<{ type: string; exemptFuelTypes: string[]; exemptVehicleTypes: string[] }>;
+  driverRequirements: string[];
+  blockOnMissing: boolean;
+  blockOnUnverified: boolean;
+  ewayBillValueThreshold: number | null;
+  blockOnMissingShipmentDocs: boolean;
 }
 
 export interface Company {
@@ -61,6 +72,11 @@ export interface Vehicle {
   odometerKm: number;
   depotLocationId: number | null;
   depotLocation?: { id: number; name: string } | null;
+  registrationState?: string | null;
+  ownershipType?: "OWNED" | "LEASED" | "ATTACHED";
+  ownerName?: string | null;
+  ownerPhone?: string | null;
+  fastagId?: string | null;
 }
 
 export interface Driver {
@@ -73,6 +89,17 @@ export interface Driver {
   maxShiftHours: number;
   userId: number | null;
   user?: { id: number; email: string } | null;
+  licenseClass?: string | null;
+  licenseIssuedOn?: string | null;
+  /** KYC fields are present only for roles with kyc:read. */
+  address?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  kycIdType?: string | null;
+  kycIdLast4?: string | null;
+  kycConsentAt?: string | null;
+  kycVerification?: "PENDING" | "VERIFIED" | "REJECTED";
+  kycOnFile?: boolean;
 }
 
 export interface ComplianceDoc {
@@ -89,6 +116,10 @@ export interface ComplianceDoc {
   fileName: string | null;
   hasFile: boolean;
   expiryState?: "EXPIRED" | "EXPIRING_SOON" | "VALID" | "NO_EXPIRY";
+  verificationStatus?: "PENDING" | "VERIFIED" | "REJECTED";
+  rejectionReason?: string | null;
+  verifiedAt?: string | null;
+  attachments?: Attachment[];
 }
 
 export interface Order {
@@ -275,7 +306,9 @@ export interface BillingDoc {
   dueDate: string | null;
   notes: string | null;
   createdAt: string;
-  items?: Array<{ id: number; description: string; quantity: number; unit: string; rate: number; amount: number }>;
+  reasonForTransport?: string | null;
+  referenceDocuments?: string | null;
+  items?: Array<{ id: number; description: string; hsnCode?: string | null; quantity: number; unit: string; rate: number; amount: number }>;
   seller?: { name: string; gstNumber: string | null; address: string | null; city: string | null; state: string | null };
 }
 
@@ -295,4 +328,118 @@ export interface RoadEdge {
   bidirectional: boolean;
   isClosed: boolean;
   name: string | null;
+}
+
+// ───────────────────────── Documents, compliance & shipments ─────────────────────────
+
+export interface Attachment {
+  id: number;
+  role: "FRONT" | "BACK" | "PAGE" | "PHOTO" | "SIGNATURE";
+  fileName: string;
+  fileMimeType: string;
+  fileSizeBytes: number;
+  createdAt: string;
+}
+
+export type DocState = "COMPLIANT" | "EXPIRING_SOON" | "EXPIRED" | "MISSING" | "PENDING_VERIFICATION" | "REJECTED" | "NOT_APPLICABLE";
+
+export interface RequirementResult {
+  type: string;
+  required: boolean;
+  state: DocState;
+  documentId: number | null;
+  documentNumber: string | null;
+  expiresOn: string | null;
+  daysToExpiry: number | null;
+  blocking: boolean;
+  message: string;
+}
+
+export interface EntityCompliance {
+  overall: "COMPLIANT" | "EXPIRING_SOON" | "PENDING_VERIFICATION" | "MISSING" | "EXPIRED";
+  eligible: boolean;
+  items: RequirementResult[];
+  blockers: string[];
+  warnings: string[];
+}
+
+export interface ComplianceOverview {
+  evaluatedAt: string;
+  alertDays: number;
+  vehicles: { total: number; blocked: number; byState: Record<EntityCompliance["overall"], number> };
+  drivers: { total: number; blocked: number; byState: Record<EntityCompliance["overall"], number> };
+  attention: Array<{ kind: "VEHICLE" | "DRIVER"; id: number; label: string; overall: EntityCompliance["overall"]; eligible: boolean; issues: string[] }>;
+}
+
+export interface EwayBill {
+  id: number;
+  orderId: number;
+  tripId: number | null;
+  ewbNumber: string;
+  documentDate: string;
+  validUntil: string | null;
+  supplierName: string;
+  supplierGstin: string | null;
+  recipientName: string;
+  recipientGstin: string | null;
+  placeOfDispatch: string;
+  placeOfDelivery: string;
+  goodsDescription: string;
+  hsnCode: string | null;
+  quantity: number | null;
+  quantityUnit: string | null;
+  taxableValue: number | null;
+  invoiceOrChallanRef: string | null;
+  transporterId: string | null;
+  vehicleNumber: string | null;
+  transportDocNumber: string | null;
+  status: "ACTIVE" | "CANCELLED";
+  expired?: boolean;
+  attachments: Attachment[];
+}
+
+export interface LorryReceiptSummary {
+  id: number;
+  lrNumber: string;
+  status: "ACTIVE" | "CANCELLED";
+  orderId: number;
+}
+
+export type PodStatus = "DELIVERED" | "PARTIALLY_DELIVERED" | "FAILED" | "RETURNED" | "DISPUTED";
+
+export interface ProofOfDelivery {
+  id: number;
+  tripId: number;
+  tripStopId: number;
+  orderId: number | null;
+  status: PodStatus;
+  receiverName: string;
+  receiverPhone: string | null;
+  deliveredAt: string;
+  deliveredQuantity: number | null;
+  shortageDetails: string | null;
+  damageDetails: string | null;
+  remarks: string | null;
+  attachments: Attachment[];
+}
+
+export interface TripDocuments {
+  trip: { id: number; tripNumber: string; status: string; vehicle: string; driver: string };
+  compliance: { eligible: boolean; blockers: string[]; warnings: string[]; vehicle: EntityCompliance; driver: EntityCompliance; shipments: Array<{ orderId: number; orderNumber: string; ewayBill: { applicable: boolean | null; state: DocState; message: string; blocking: boolean } }> };
+  vehicleDocuments: Array<ComplianceDoc> | null;
+  driverDocuments: Array<ComplianceDoc> | null;
+  billing: Array<{ id: number; kind: "INVOICE" | "DELIVERY_CHALLAN"; number: string; status: string; total: number }> | null;
+  orders: Array<{
+    id: number;
+    orderNumber: string;
+    customerName: string;
+    declaredValue: number | null;
+    weightKg: number;
+    stopId: number;
+    stopStatus: string;
+    dropLocation: string;
+    ewayBills: EwayBill[];
+    lorryReceipts: LorryReceiptSummary[];
+    pod: ProofOfDelivery | null;
+  }>;
 }

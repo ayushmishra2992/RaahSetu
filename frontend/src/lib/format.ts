@@ -53,7 +53,21 @@ export function todayIso(): string {
   return toLocalInput(new Date()).slice(0, 10);
 }
 
-const DOC_TYPE: Record<string, string> = { RC: "RC", PUC: "PUC", INSURANCE: "Insurance", FITNESS: "Fitness", PERMIT: "Permit", DRIVING_LICENSE: "Driving licence", OTHER: "Other" };
+const DOC_TYPE: Record<string, string> = {
+  RC: "RC",
+  PUC: "PUC",
+  INSURANCE: "Insurance",
+  FITNESS: "Fitness",
+  PERMIT: "Permit (national)",
+  STATE_PERMIT: "State permit",
+  FASTAG: "FASTag",
+  DRIVING_LICENSE: "Driving licence",
+  DRIVER_PHOTO: "Driver photo",
+  KYC_ID: "KYC identity proof",
+  OTHER: "Other",
+};
+export const VEHICLE_DOC_TYPES = ["RC", "INSURANCE", "PUC", "FITNESS", "PERMIT", "STATE_PERMIT", "FASTAG", "OTHER"] as const;
+export const DRIVER_DOC_TYPES = ["DRIVING_LICENSE", "DRIVER_PHOTO", "KYC_ID", "OTHER"] as const;
 /** Compliance document type label (keeps acronyms such as RC and PUC upper-case). */
 export const docTypeLabel = (t?: string | null) => (t ? (DOC_TYPE[t] ?? humanize(t)) : "—");
 

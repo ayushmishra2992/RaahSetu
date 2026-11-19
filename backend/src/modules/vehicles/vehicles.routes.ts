@@ -6,6 +6,10 @@ import { badRequest, conflict, notFound } from "../../lib/errors";
 import { authOf } from "../../lib/http";
 import { parseBody, parseId, parsePatch, parseQuery } from "../../lib/validate";
 import { requirePermission } from "../../middleware/auth";
+import { deleteStoredObjects, publicAttachment } from "../attachments/attachments.service";
+import { getCompanySettings } from "../company/settings";
+import { redactCompliance } from "../compliance/compliance";
+import { vehicleCompliance, visibilityFor } from "../compliance/compliance.service";
 
 const router = Router();
 
@@ -27,6 +31,17 @@ const VehicleBody = z.object({
   status: z.enum(["AVAILABLE", "ON_TRIP", "MAINTENANCE", "INACTIVE"]).optional(),
   odometerKm: z.coerce.number().int().nonnegative().optional(),
   depotLocationId: z.coerce.number().int().positive().optional().nullable(),
+  registrationState: z.string().trim().max(60).optional().nullable(),
+  ownershipType: z.enum(["OWNED", "LEASED", "ATTACHED"]).optional(),
+  ownerName: z.string().trim().max(120).optional().nullable(),
+  ownerPhone: z
+    .string()
+    .trim()
+    .regex(/^[+0-9 -]{7,20}$/, "Enter a valid phone number")
+    .optional()
+    .nullable()
+    .or(z.literal("").transform(() => null)),
+  fastagId: z.string().trim().max(40).optional().nullable(),
 });
 
 async function assertDepot(companyId: number, depotLocationId?: number | null) {
@@ -56,13 +71,19 @@ router.get("/:id", requirePermission("fleet:read"), async (req, res) => {
     where: { id: parseId(req.params.id), companyId: auth.companyId },
     include: {
       depotLocation: true,
-      documents: { orderBy: { expiresOn: "asc" } },
+      documents: { orderBy: { expiresOn: "asc" }, include: { attachments: true } },
       trips: { orderBy: { plannedStart: "desc" }, take: 10, include: { driver: { select: { id: true, name: true } } } },
       fuelRecords: { orderBy: { filledAt: "desc" }, take: 10 },
     },
   });
   if (!vehicle) throw notFound("Vehicle");
-  res.json(vehicle);
+  const settings = await getCompanySettings(auth.companyId);
+  res.json({
+    ...vehicle,
+    // Storage keys are internal: never sent to clients.
+    documents: vehicle.documents.map(({ storageKey, attachments, ...d }) => ({ ...d, hasFile: !!storageKey || attachments.length > 0, attachments: attachments.map(publicAttachment) })),
+    compliance: redactCompliance(vehicleCompliance(vehicle, settings), visibilityFor(auth.role)),
+  });
 });
 
 router.post("/", requirePermission("fleet:write"), async (req, res) => {
@@ -98,7 +119,9 @@ router.delete("/:id", requirePermission("fleet:write"), async (req, res) => {
   const existing = await prisma.vehicle.findFirst({ where: { id, companyId: auth.companyId }, include: { _count: { select: { trips: true } } } });
   if (!existing) throw notFound("Vehicle");
   if (existing._count.trips > 0) throw conflict("Vehicle has trip history; set its status to INACTIVE instead of deleting");
-  await prisma.vehicle.delete({ where: { id } });
+  const docs = await prisma.complianceDocument.findMany({ where: { vehicleId: id, companyId: auth.companyId }, select: { storageKey: true, attachments: { select: { storageKey: true } } } });
+  await prisma.vehicle.delete({ where: { id } }); // documents and attachments cascade
+  await deleteStoredObjects(auth.companyId, docs.flatMap((d) => [d.storageKey, ...d.attachments.map((a) => a.storageKey)]));
   await audit(auth, "vehicle.deleted", "Vehicle", id, { registrationNumber: existing.registrationNumber });
   res.status(204).end();
 });

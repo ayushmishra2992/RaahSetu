@@ -11,6 +11,18 @@ export const PERMISSIONS = {
   "fleet:write": ["ADMIN", "MANAGER"],
   "documents:read": ["ADMIN", "MANAGER", "DISPATCHER", "EMPLOYEE"],
   "documents:write": ["ADMIN", "MANAGER"],
+  /** Mark uploaded vehicle/driver documents verified or rejected. */
+  "documents:verify": ["ADMIN", "MANAGER"],
+  /** Driver KYC fields (masked ID, consent, address, emergency contact). */
+  "kyc:read": ["ADMIN", "MANAGER"],
+  "kyc:write": ["ADMIN", "MANAGER"],
+  /** E-Way Bills, lorry receipts, challans/PODs as trip paperwork. Drivers: own trips only (enforced in the module). */
+  "shipments:read": ["ADMIN", "MANAGER", "DISPATCHER", "EMPLOYEE", "DRIVER"],
+  "shipments:write": ["ADMIN", "MANAGER", "DISPATCHER"],
+  /** Record proof of delivery. Drivers: own trips only (enforced in the module). */
+  "pod:write": ["ADMIN", "MANAGER", "DISPATCHER", "DRIVER"],
+  /** Resolve a DISPUTED proof of delivery (change its outcome after the fact). */
+  "pod:resolve": ["ADMIN", "MANAGER"],
   "locations:read": ["ADMIN", "MANAGER", "DISPATCHER", "EMPLOYEE", "DRIVER"],
   "locations:write": ["ADMIN", "MANAGER", "DISPATCHER"],
   "orders:read": ["ADMIN", "MANAGER", "DISPATCHER", "EMPLOYEE"],

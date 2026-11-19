@@ -1,8 +1,9 @@
 "use client";
 
-import { Building2, KeyRound, Leaf, Route } from "lucide-react";
+import { Building2, KeyRound, Leaf, Route, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { CompliancePolicyForm } from "@/components/CompliancePolicyForm";
 import { FormShell } from "@/components/forms";
 import { Alert, Card, Field, Input, PageHeader, StatusBadge, Tabs, useToast } from "@/components/ds";
 import { api } from "@/lib/api";
@@ -35,10 +36,12 @@ export default function SettingsPage() {
   const toast = useToast();
   const num = (v: string) => (v === "" ? 0 : Number(v));
 
-  const saveSettings = async (successMessage: string) => {
+  /** Sends only the keys of one section; the API merges them into the stored settings. */
+  const saveSettings = async (keys: Array<keyof Settings>, successMessage: string) => {
     const p = settingsProblem(settings);
     if (p) throw new Error(p);
-    await api("/company", { method: "PATCH", body: { settings } });
+    const partial = Object.fromEntries(keys.map((k) => [k, settings[k]]));
+    await api("/company", { method: "PATCH", body: { settings: partial } });
     await refresh();
     toast.success(successMessage);
   };
@@ -57,6 +60,7 @@ export default function SettingsPage() {
                 { id: "company", label: "Company" },
                 { id: "estimates", label: "Costs & emissions" },
                 { id: "optiroute", label: "OptiRoute defaults" },
+                { id: "compliance", label: "Compliance" },
               ]
             : []),
           { id: "account", label: "Your account" },
@@ -104,7 +108,7 @@ export default function SettingsPage() {
 
       {admin && tab === "estimates" && (
         <Card title="Costs & emission factors" icon={Leaf} description="Used for every fuel, cost and CO₂ estimate in OptiRoute, trips and GreenFleet">
-          <FormShell submitLabel="Save factors" onSubmit={() => saveSettings("Factors saved. New estimates and plans use them; existing trips keep their estimates.")}>
+          <FormShell submitLabel="Save factors" onSubmit={() => saveSettings(["fuelPricePerUnit", "emissionKgPerUnit", "loadPenaltyAtFullLoad", "driverCostPerHour", "documentExpiryAlertDays"], "Factors saved. New estimates and plans use them; existing trips keep their estimates.")}>
             <p className="text-sm text-muted">Defaults are placeholders. Enter your actual fuel prices, and verify emission factors against an official source before using them for formal reporting.</p>
             <fieldset className="min-w-0">
               <legend className="mb-2 text-sm font-medium text-ink">Fuel and energy prices</legend>
@@ -143,7 +147,7 @@ export default function SettingsPage() {
 
       {admin && tab === "optiroute" && (
         <Card title="Default OptiRoute weights" icon={Route} description="Starting values for the objective in new plans; planners can still change them per run">
-          <FormShell submitLabel="Save defaults" onSubmit={() => saveSettings("OptiRoute defaults saved")}>
+          <FormShell submitLabel="Save defaults" onSubmit={() => saveSettings(["defaultWeights"], "OptiRoute defaults saved")}>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
               {(Object.keys(settings.defaultWeights) as Array<keyof Settings["defaultWeights"]>).map((k) => (
                 <Field key={k} label={humanize(k)} hint={WEIGHT_HELP[k]}>
@@ -152,6 +156,18 @@ export default function SettingsPage() {
               ))}
             </div>
           </FormShell>
+        </Card>
+      )}
+
+      {admin && tab === "compliance" && (
+        <Card title="Compliance policy" icon={ShieldCheck} description="Which documents are required and when dispatch is blocked. Applies to OptiRoute, manual trips and dispatch.">
+          <CompliancePolicyForm
+            initial={c.settings.compliance}
+            onSaved={async () => {
+              await refresh();
+              toast.success("Compliance policy saved");
+            }}
+          />
         </Card>
       )}
 

@@ -239,3 +239,29 @@ export const reverseFor = (lat: number, lng: number) => ({
   place: { providerPlaceId: "rev-1", name: "Mankoli Naka", address: "Mankoli Naka, Anjur Phata Road, Bhiwandi, Thane, Maharashtra, 421302, India", city: "Bhiwandi", state: "Maharashtra", postalCode: "421302", country: "India", lat: lat + 0.0002, lng },
   distanceM: 22,
 });
+
+// ── Documents & compliance (shapes match backend/src/modules/compliance and shipments)
+const compliantItem = (type: string) => ({ type, required: true, state: "COMPLIANT", documentId: 1, documentNumber: `${type}-1`, expiresOn: "2027-06-30T00:00:00.000Z", daysToExpiry: 220, blocking: false, message: `${type} is valid` });
+export const vehicleCompliance = {
+  overall: "EXPIRED",
+  eligible: false,
+  items: [compliantItem("RC"), compliantItem("INSURANCE"), { ...compliantItem("PUC"), state: "EXPIRED", expiresOn: "2026-10-01T00:00:00.000Z", daysToExpiry: -48, blocking: true, message: "PUC expired on 2026-10-01" }],
+  blockers: ["PUC expired on 2026-10-01"],
+  warnings: [],
+};
+export const driverCompliance = { overall: "COMPLIANT", eligible: true, items: [compliantItem("DRIVING_LICENSE")], blockers: [], warnings: [] };
+export const complianceOverview = {
+  evaluatedAt: "2026-11-18T06:00:00.000Z",
+  alertDays: 30,
+  vehicles: { total: 3, blocked: 1, byState: { COMPLIANT: 1, EXPIRING_SOON: 1, PENDING_VERIFICATION: 0, MISSING: 0, EXPIRED: 1 } },
+  drivers: { total: 2, blocked: 0, byState: { COMPLIANT: 2, EXPIRING_SOON: 0, PENDING_VERIFICATION: 0, MISSING: 0, EXPIRED: 0 } },
+  attention: [{ kind: "VEHICLE", id: 2, label: "MH04QA1002", overall: "EXPIRED", eligible: false, issues: ["PUC expired on 2026-10-01"] }],
+};
+export const tripDocuments = {
+  trip: { id: 1, tripNumber: "TRP-QA0001", status: "IN_TRANSIT", vehicle: "MH04QA1001", driver: "Ramesh Pawar" },
+  compliance: { eligible: true, blockers: [], warnings: [], vehicle: driverCompliance, driver: driverCompliance, shipments: [{ orderId: 1, orderNumber: "ORD-QA0001", ewayBill: { applicable: false, state: "NOT_APPLICABLE", message: "Declared value ₹20000 is within ₹50000", blocking: false } }] },
+  vehicleDocuments: [],
+  driverDocuments: [],
+  billing: [],
+  orders: [{ id: 1, orderNumber: "ORD-QA0001", customerName: "QA Customer", declaredValue: 20000, weightKg: 500, stopId: 3, stopStatus: "PENDING", dropLocation: "Vashi Market", ewayBills: [], lorryReceipts: [], pod: null }],
+};

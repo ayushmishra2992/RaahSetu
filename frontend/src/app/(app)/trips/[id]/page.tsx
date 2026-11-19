@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { MapLegend, RouteMap, type MapPoint } from "@/components/RouteMap";
+import { TripDocuments } from "@/components/TripDocuments";
 import { Alert, Badge, Button, Card, Dialog, ErrorState, Field, Input, LinkButton, Loading, PageHeader, Stat, StatusBadge, SyntheticNote, cx, useConfirm, useToast } from "@/components/ds";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { fmtDateTime, fmtMinutes, fmtMoney, fmtNum, FUEL_UNIT, humanize } from "@/lib/format";
@@ -252,6 +253,8 @@ export default function TripDetailPage() {
           </Card>
         </div>
       </div>
+
+      <TripDocuments tripId={t.id} tripStatus={t.status} onChanged={reload} />
 
       <Dialog open={!!qr} onClose={() => setQr(null)} title="Trip verification QR" description="Checkpoints can scan this to confirm the trip exists in RaahSetu." size="sm">
         {qr && (

@@ -71,7 +71,7 @@ Environment variables:
 
 Check `https://<your-api-host>/api/health` → `"database": "ok"`.
 
-Uploaded compliance documents are written to `UPLOAD_DIR` on the instance disk. Many hosts (including free tiers) do not keep that disk across restarts — fine for a demo; for real use, replace `backend/src/modules/documents/storage.ts` with S3/R2/GCS storage.
+Uploaded documents (vehicle/driver documents, E-Way Bill copies, POD photos and signatures) go to the storage driver in `STORAGE_DRIVER`. The default `local` writes to `UPLOAD_DIR` on the instance disk, which **Render's free plan wipes on every deploy and restart** — `/api/health` then reports `storage.persistent: false`. For real use set `STORAGE_DRIVER=s3` with a private S3-compatible bucket (AWS S3, Cloudflare R2, Backblaze B2, MinIO); see [DOCUMENTS_AND_COMPLIANCE.md § Document storage](DOCUMENTS_AND_COMPLIANCE.md#8-document-storage). Check the provider's pricing first. Migration `20261118120000_transport_documents_compliance` must be applied (`prisma migrate deploy` in the start command does this) before the new features work.
 
 ### 3. Web — Vercel (or any Next.js host)
 

@@ -54,6 +54,26 @@ router.get("/:token", async (req, res) => {
     });
     return;
   }
+  const pod = await prisma.proofOfDelivery.findUnique({
+    where: { verificationToken: token },
+    include: { company: { select: { name: true } }, order: { select: { orderNumber: true } }, trip: { select: { tripNumber: true, vehicle: { select: { registrationNumber: true } } } } },
+  });
+  if (pod) {
+    res.json({
+      valid: true,
+      type: "PROOF_OF_DELIVERY",
+      number: pod.order?.orderNumber ?? pod.trip.tripNumber,
+      status: pod.status,
+      issuer: pod.company.name,
+      tripNumber: pod.trip.tripNumber,
+      vehicleRegistration: pod.trip.vehicle.registrationNumber,
+      // First name only: enough to match the paper copy, without publishing personal data.
+      receivedBy: pod.receiverName.split(" ")[0],
+      deliveredAt: pod.deliveredAt,
+      disclaimer: "Verified against RaahSetu records only.",
+    });
+    return;
+  }
   throw notFound("Verification record");
 });
 

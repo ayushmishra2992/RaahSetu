@@ -5,15 +5,16 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { ComplianceList } from "@/components/ComplianceList";
+import { ComplianceList, ComplianceSummary } from "@/components/ComplianceList";
+import { DriverKycCard } from "@/components/DriverKycCard";
 import { DriverForm } from "@/components/forms";
 import { Alert, Button, Card, ConfirmButton, ErrorState, Loading, Modal, PageHeader, Stat, StatusBadge, Table, Td, useToast } from "@/components/ds";
 import { api, errorMessage } from "@/lib/api";
 import { daysUntil, expiryStateOf, fmtDate, fmtDateTime, fmtRelDays } from "@/lib/format";
-import type { ComplianceDoc, Driver, Trip } from "@/lib/types";
+import type { ComplianceDoc, Driver, EntityCompliance, Trip } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
-type DriverDetail = Driver & { documents: ComplianceDoc[]; trips: Array<Trip & { vehicle: { id: number; registrationNumber: string } }> };
+type DriverDetail = Driver & { compliance?: EntityCompliance; documents: ComplianceDoc[]; trips: Array<Trip & { vehicle: { id: number; registrationNumber: string } }> };
 
 export default function DriverDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -31,7 +32,7 @@ export default function DriverDetailPage() {
     <div className="space-y-5">
       <PageHeader
         title={d.name}
-        subtitle={`${d.phone} · licence ${d.licenseNumber}`}
+        subtitle={`${d.phone} · licence ${d.licenseNumber}${d.licenseClass ? ` (${d.licenseClass})` : ""}`}
         meta={
           <>
             <StatusBadge status={d.status} />
@@ -73,7 +74,9 @@ export default function DriverDetailPage() {
         <Stat label="App login" icon={Smartphone} value={d.user ? "Linked" : "Not linked"} hint={d.user?.email ?? "Link a DRIVER user to let them update trips"} className="col-span-2 lg:col-span-1" />
       </section>
 
-      <ComplianceList docs={d.documents} owner={{ driverId: d.id }} />
+      {d.compliance && <ComplianceSummary compliance={d.compliance} subject={d.name} />}
+      <ComplianceList docs={d.documents} owner={{ driverId: d.id, label: d.name }} onChanged={reload} />
+      {can("kyc:read") && <DriverKycCard driver={d} onSaved={reload} />}
 
       <Card title="Recent trips" icon={Navigation}>
         <Table head={["Trip", "Vehicle", "Start", "Status"]} empty={d.trips.length === 0} emptyMessage="No trips yet." caption="Recent trips">

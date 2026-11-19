@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../../config/prisma";
 import { authOf } from "../../lib/http";
+import { can } from "../../lib/permissions";
 import { round } from "../../lib/numbering";
 import { requirePermission } from "../../middleware/auth";
 import { getCompanySettings } from "../company/settings";
@@ -28,7 +29,9 @@ router.get("/", requirePermission("dashboard:read"), async (req, res) => {
     prisma.order.groupBy({ by: ["status"], where: { companyId }, _count: { _all: true } }),
     prisma.trip.groupBy({ by: ["status"], where: { companyId }, _count: { _all: true } }),
     prisma.complianceDocument.findMany({
-      where: { companyId, expiresOn: { lte: alertHorizon } },
+      // KYC identity proofs only for callers with kyc:read. Filtered in the query so the
+      // alert list, its count and the 50-row cap all agree.
+      where: { companyId, expiresOn: { lte: alertHorizon }, ...(can(auth.role, "kyc:read") ? {} : { type: { not: "KYC_ID" as const } }) },
       include: { vehicle: { select: { registrationNumber: true } }, driver: { select: { name: true } } },
       orderBy: { expiresOn: "asc" },
       take: 50,
