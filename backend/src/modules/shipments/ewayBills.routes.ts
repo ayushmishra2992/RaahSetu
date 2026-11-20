@@ -205,14 +205,24 @@ router.post("/:id/files", requirePermission("shipments:write"), uploadLimiter, u
   if (e.attachments.length + files.length > 5) throw badRequest(`An E-Way Bill can have at most 5 files (${e.attachments.length} already attached)`);
   const stored: Awaited<ReturnType<typeof storeAttachment>>[] = [];
   try {
-    for (const f of files) stored.push(await storeAttachment(auth, f, { ewayBillId: e.id }, "PAGE"));
+    // The E-Way Bill row is locked for the whole upload, so a cancellation waits for it (or wins first
+    // and the upload is refused), and two simultaneous uploads cannot exceed the 5-file limit.
+    await prisma.$transaction(
+      async (tx) => {
+        const [row] = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM "EwayBill" WHERE id = ${e.id} AND "companyId" = ${auth.companyId} FOR UPDATE`;
+        if (!row || row.status !== "ACTIVE") throw conflict("Files cannot be added to a cancelled E-Way Bill record");
+        const attached = await tx.attachment.count({ where: { ewayBillId: e.id } });
+        if (attached + files.length > 5) throw badRequest(`An E-Way Bill can have at most 5 files (${attached} already attached)`);
+        for (const f of files) stored.push(await storeAttachment(auth, f, { ewayBillId: e.id }, "PAGE", undefined, tx));
+        await audit(auth, "file.uploaded", "EwayBill", e.id, { files: stored.map((s) => ({ id: s.id, bytes: s.fileSizeBytes })) }, tx);
+      },
+      { timeout: 60_000 },
+    );
   } catch (err) {
-    // All or nothing: remove the files of this request that did get stored.
-    await prisma.attachment.deleteMany({ where: { id: { in: stored.map((s) => s.id) } } });
+    // All or nothing: the rows rolled back with the transaction; remove the objects already stored.
     await deleteStoredObjects(auth.companyId, stored.map((s) => s.storageKey));
     throw err;
   }
-  await audit(auth, "file.uploaded", "EwayBill", e.id, { files: stored.map((s) => ({ id: s.id, bytes: s.fileSizeBytes })) });
   res.status(201).json(stored.map(publicAttachment));
 });
 

@@ -27,8 +27,9 @@ import {
 } from "@/components/ds";
 import { api, errorMessage } from "@/lib/api";
 import { fmtDateTime, fmtMoney, fmtNum, humanize, isPast } from "@/lib/format";
-import type { Order } from "@/lib/types";
+import type { EwayBill, LorryReceipt, Order, PodStatus } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
+import { LrBadge } from "@/components/transport/TransportDocForms";
 import { OrderForm } from "./OrderForm";
 
 type OrderDetail = Order & { tripStops?: Array<{ id: number; type: string; trip: { id: number; tripNumber: string; status: string } }> };
@@ -246,6 +247,7 @@ function OrdersInner() {
 }
 
 function OrderDrawer({ id, onClose, onEdit, canWrite }: { id: string | null; onClose: () => void; onEdit: (o: Order) => void; canWrite: boolean }) {
+  const { can } = useAuth();
   const { data: o, error, loading, reload } = useApi<OrderDetail>(id ? `/orders/${id}` : null);
   const trips = o?.tripStops ? [...new Map(o.tripStops.map((s) => [s.trip.id, s.trip])).values()] : [];
   return (
@@ -288,6 +290,7 @@ function OrderDrawer({ id, onClose, onEdit, canWrite }: { id: string | null; onC
               </ul>
             )}
           </section>
+          {can("shipments:read") && <OrderDocuments orderId={o.id} />}
           {canWrite && o.status === "PENDING" && (
             <Button variant="secondary" icon={Pencil} onClick={() => onEdit(o)}>
               Edit order
@@ -296,6 +299,49 @@ function OrderDrawer({ id, onClose, onEdit, canWrite }: { id: string | null; onC
         </div>
       )}
     </Drawer>
+  );
+}
+
+/** The order's shipment paperwork (E-Way Bills, lorry receipts, POD), each linked to its full record. */
+function OrderDocuments({ orderId }: { orderId: number }) {
+  const ewbs = useApi<EwayBill[]>(`/eway-bills?orderId=${orderId}`);
+  const lrs = useApi<LorryReceipt[]>(`/lorry-receipts?orderId=${orderId}`);
+  const pods = useApi<Array<{ id: number; status: PodStatus; receiverName: string; deliveredAt: string }>>(`/pods?orderId=${orderId}`);
+  const failed = ewbs.error ?? lrs.error ?? pods.error;
+  const loading = (ewbs.loading && !ewbs.data) || (lrs.loading && !lrs.data) || (pods.loading && !pods.data);
+  const none = !ewbs.data?.length && !lrs.data?.length && !pods.data?.length;
+  return (
+    <section aria-labelledby="order-docs">
+      <h3 id="order-docs" className="mb-2 font-medium text-ink">Transport documents</h3>
+      {loading ? (
+        <SkeletonText lines={2} />
+      ) : failed ? (
+        <p className="text-danger-700">{failed}</p>
+      ) : none ? (
+        <p className="text-muted">No E-Way Bill, lorry receipt or proof of delivery yet. They are added from the order&apos;s trip.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {ewbs.data?.map((e) => (
+            <li key={`e${e.id}`} className="flex items-center justify-between gap-2">
+              <Link href={`/transport-documents/eway-bills/${e.id}`} className="font-medium text-brand-700 hover:underline">E-Way Bill {e.ewbNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}</Link>
+              <StatusBadge status={e.status === "CANCELLED" ? "CANCELLED" : e.expired ? "EXPIRED" : "VALID"} />
+            </li>
+          ))}
+          {lrs.data?.map((l) => (
+            <li key={`l${l.id}`} className="flex items-center justify-between gap-2">
+              <Link href={`/transport-documents/lorry-receipts/${l.id}`} className="font-medium text-brand-700 hover:underline">LR {l.lrNumber}</Link>
+              <LrBadge l={l} />
+            </li>
+          ))}
+          {pods.data?.map((p) => (
+            <li key={`p${p.id}`} className="flex items-center justify-between gap-2">
+              <a href={`/api/pods/${p.id}/pdf`} target="_blank" rel="noopener" className="font-medium text-brand-700 hover:underline">POD · {p.receiverName}</a>
+              <StatusBadge status={p.status} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

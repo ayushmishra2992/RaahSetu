@@ -1,4 +1,4 @@
-import { ewayBills, meFor, tripDocuments } from "./fixtures/data";
+import { ewayBills, meFor, TINY_PNG, tripDocuments } from "./fixtures/data";
 import { calls, expect, test } from "./fixtures/test";
 
 test.describe("transport documents register", () => {
@@ -190,5 +190,76 @@ test.describe("trip paperwork links", () => {
     await expect(order.getByRole("link", { name: /E-Way Bill 391012345678: details/ })).toHaveAttribute("href", "/transport-documents/eway-bills/11");
     await expect(order.getByRole("link", { name: /Lorry receipt LR-20261118-QA0001: details/ })).toHaveAttribute("href", "/transport-documents/lorry-receipts/21");
     await expect(order).toContainText("Draft");
+  });
+});
+
+// ───── Proof of delivery: dispute resolution and photos added later ─────
+const disputedPod = {
+  id: 41, tripId: 1, tripStopId: 3, orderId: 1, status: "DISPUTED", receiverName: "QA Receiver", receiverPhone: null, deliveredAt: new Date(Date.now() - 3600_000).toISOString(),
+  deliveredQuantity: 480, shortageDetails: null, damageDetails: null, remarks: "Synthetic: customer disputes quantity",
+  attachments: [
+    { id: 701, role: "SIGNATURE", fileName: "signature.png", fileMimeType: "image/png", fileSizeBytes: 900, createdAt: new Date().toISOString() },
+    { id: 702, role: "PHOTO", fileName: "photo-1.jpg", fileMimeType: "image/jpeg", fileSizeBytes: 9000, createdAt: new Date().toISOString() },
+  ],
+};
+const withDisputedPod = { ...tripDocuments, orders: [{ ...tripDocuments.orders[0], stopStatus: "COMPLETED", pod: disputedPod }] };
+
+test.describe("disputed proof of delivery (manager or admin)", () => {
+  test.use({ overrides: { "GET /api/trips/1/documents": withDisputedPod } });
+
+  test("resolves a dispute with an agreed outcome and remarks", async ({ page, api }) => {
+    await page.goto("/trips/1");
+    const order = page.getByRole("region", { name: /ORD-QA0001/ });
+    await expect(order).toContainText("Remarks: Synthetic: customer disputes quantity");
+    await order.getByRole("button", { name: "Resolve dispute" }).click();
+    const dialog = page.getByRole("dialog", { name: /Resolve disputed delivery/ });
+    await dialog.getByLabel("Agreed outcome").selectOption("PARTIALLY_DELIVERED");
+    await dialog.getByLabel(/Delivered quantity/).fill("600"); // more than the 500 kg ordered
+    await dialog.getByLabel("Resolution remarks").fill("Synthetic: 2 cartons credited");
+    await dialog.getByRole("button", { name: "Resolve dispute" }).click();
+    await expect(dialog.getByText("A partial delivery must be less than the ordered 500 kg.").first()).toBeVisible();
+    await dialog.getByLabel(/Delivered quantity/).fill("450");
+    await dialog.getByRole("button", { name: "Resolve dispute" }).click();
+    await expect(dialog.getByText("Describe the shortage or damage.").first()).toBeVisible();
+    expect(calls(api, "PATCH", "/api/pods/41")).toHaveLength(0);
+    await dialog.getByLabel("Shortage details").fill("Synthetic: 2 cartons short");
+    await dialog.getByRole("button", { name: "Resolve dispute" }).click();
+    await expect(dialog).toBeHidden();
+    expect(calls(api, "PATCH", "/api/pods/41")[0].body).toEqual({ status: "PARTIALLY_DELIVERED", remarks: "Synthetic: 2 cartons credited", deliveredQuantity: 450, shortageDetails: "Synthetic: 2 cartons short", damageDetails: null });
+  });
+
+  test("adds delivery photos later and opens existing ones", async ({ page, api }) => {
+    await page.goto("/trips/1");
+    const order = page.getByRole("region", { name: /ORD-QA0001/ });
+    await expect(order.getByRole("button", { name: "Open delivery photo 1" })).toBeVisible();
+    await order.getByRole("button", { name: "Add photos" }).click();
+    const dialog = page.getByRole("dialog", { name: /Add delivery photos/ });
+    await expect(dialog).toContainText("1 of 8 photos attached");
+    await dialog.getByRole("group", { name: "Delivery photos" }).locator('input[type="file"]:not([capture])').setInputFiles({ name: "later.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG.split(",")[1], "base64") });
+    await dialog.getByRole("button", { name: "Upload photos" }).click();
+    await expect(dialog).toBeHidden();
+    expect(String(calls(api, "POST", "/api/pods/41/photos")[0].body)).toMatch(/name="photos"; filename="later\.(png|jpg)"/);
+  });
+});
+
+test.describe("disputed proof of delivery (employee)", () => {
+  test.use({ role: "EMPLOYEE", overrides: { "GET /api/trips/1/documents": withDisputedPod } });
+  test("employees see the dispute but cannot resolve it or add photos", async ({ page }) => {
+    await page.goto("/trips/1");
+    const order = page.getByRole("region", { name: /ORD-QA0001/ });
+    await expect(order).toContainText("A manager or admin resolves disputed deliveries.");
+    await expect(order.getByRole("button", { name: "Resolve dispute" })).toHaveCount(0);
+    await expect(order.getByRole("button", { name: "Add photos" })).toHaveCount(0);
+  });
+});
+
+test.describe("order drawer paperwork", () => {
+  test("lists the order's E-Way Bills, lorry receipts and PODs with links", async ({ page }) => {
+    await page.goto("/orders?open=1");
+    const drawer = page.getByRole("dialog", { name: /ORD-QA0001/ });
+    const docs = drawer.getByRole("region", { name: "Transport documents" });
+    await expect(docs.getByRole("link", { name: "E-Way Bill 3910 1234 5678" })).toHaveAttribute("href", "/transport-documents/eway-bills/11");
+    await expect(docs.getByRole("link", { name: "LR LR-20261118-QA0001" })).toHaveAttribute("href", "/transport-documents/lorry-receipts/21");
+    await expect(docs.getByRole("link", { name: /POD · QA Receiver/ })).toHaveAttribute("href", "/api/pods/31/pdf");
   });
 });

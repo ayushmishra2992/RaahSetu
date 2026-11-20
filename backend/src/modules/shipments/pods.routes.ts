@@ -236,10 +236,15 @@ router.patch("/:id", requirePermission("pod:write"), async (req, res) => {
   }
   const next = { ...existing, ...body };
   assertConsistent(next.status, existing.order?.weightKg ?? null, next.deliveredQuantity, next.shortageDetails, next.damageDetails, next.remarks);
-  await prisma.proofOfDelivery.update({ where: { id }, data: body });
   // Keep the before/after of what changed in the audit trail (no files, no phone numbers).
   const changes = Object.fromEntries(Object.keys(body).filter((k) => k !== "receiverPhone").map((k) => [k, { from: (existing as Record<string, unknown>)[k] ?? null, to: (body as Record<string, unknown>)[k] ?? null }]));
-  await audit(auth, "pod.updated", "ProofOfDelivery", id, { changes, phoneChanged: "receiverPhone" in body });
+  // Optimistic guard: the rules above were checked against `existing`, so the update applies only if
+  // the POD is still exactly that version (e.g. a dispute resolved meanwhile is not overwritten).
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.proofOfDelivery.updateMany({ where: { id, companyId: auth.companyId, updatedAt: existing.updatedAt }, data: body });
+    if (!count) throw conflict("This proof of delivery was changed by someone else meanwhile. Reload it and try again.");
+    await audit(auth, "pod.updated", "ProofOfDelivery", id, { changes, phoneChanged: "receiverPhone" in body }, tx);
+  });
   res.json(view(await loadPod(auth, id)));
 });
 
@@ -251,8 +256,15 @@ router.post("/:id/photos", requirePermission("pod:write"), uploadLimiter, upload
   if (!photos.length) throw badRequest("No photo was uploaded");
   if (pod.attachments.filter((a) => a.role === "PHOTO").length + photos.length > 8) throw badRequest("A proof of delivery can have at most 8 photos");
   for (const p of photos) assertAllowedFile(p.mimetype, p.buffer, p.originalname, POD_IMAGE_TYPES);
-  const stored = [];
-  for (const p of photos) stored.push(await storeAttachment(auth, p, { podId: pod.id }, "PHOTO", POD_IMAGE_TYPES));
+  const stored: Awaited<ReturnType<typeof storeAttachment>>[] = [];
+  try {
+    for (const p of photos) stored.push(await storeAttachment(auth, p, { podId: pod.id }, "PHOTO", POD_IMAGE_TYPES));
+  } catch (err) {
+    // All or nothing: remove the photos of this request that did get stored.
+    await prisma.attachment.deleteMany({ where: { id: { in: stored.map((x) => x.id) } } });
+    await deleteStoredObjects(auth.companyId, stored.map((x) => x.storageKey));
+    throw err;
+  }
   await audit(auth, "pod.photos_added", "ProofOfDelivery", pod.id, { count: stored.length });
   res.status(201).json(stored.map(publicAttachment));
 });

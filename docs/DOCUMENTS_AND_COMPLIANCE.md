@@ -172,7 +172,9 @@ The stop moves through the normal trip workflow, so pickup-before-drop and in-tr
 **Editing a recorded POD** is enforced on the server:
 - **Drivers:** they may correct details (receiver, phone, remarks, photos) on their own trip **while it is in transit only**. They can never change the outcome, and can't touch a **disputed** POD.
 - **Office staff** (dispatcher and up): they may correct details and switch between delivered outcomes, and may mark a delivery **disputed**.
-- **Resolving a dispute** (changing a disputed POD to another outcome): only **admins and managers** (`pod:resolve`), and remarks explaining the resolution are required.
+- **Resolving a dispute** (changing a disputed POD to another outcome): only **admins and managers** (`pod:resolve`), and remarks explaining the resolution are required. In the UI, use **Resolve dispute** on the trip's Proof of delivery panel and pick *Delivered in full* or *Partially delivered* (with quantity and shortage or damage details).
+- **Adding photos later:** **Add photos** on the same panel, up to 8 photos in total (JPEG or PNG). The signature is never replaced.
+- **Concurrent edits:** an edit applies only to the version of the POD it was checked against. If someone else changed it meanwhile, it returns **409** and nothing is written.
 - **Every edit:** it's audited with before and after values, and can't set a delivery time in the future.
 
 **Duplicates and cancellation:** a POD is recorded under a lock on its trip. A duplicate submission, such as a double tap or a retry after a lost response, always gets **409 `POD_EXISTS`** with the existing POD's id. A trip cancelled at the same moment either takes the POD first or rejects it with "This trip is cancelled"; nothing is stored in that case.

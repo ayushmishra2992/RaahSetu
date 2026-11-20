@@ -63,6 +63,20 @@ It also links to the existing **Invoices & challans** and **Vehicle & driver com
 
 These were not changed. Their tests still pass, and they remain fully functional.
 
+## Phase 3a: workflow gaps that needed no migration
+
+These were done after the Phase 2 commit (`c4800ae`) and are **not committed yet**.
+
+| Change | Where |
+|---|---|
+| **POD dispute resolution in the UI.** Admins and managers (`pod:resolve`) get **Resolve dispute** on a disputed POD. They pick the agreed outcome (in full or partial) and give a delivered quantity, shortage or damage details, and required remarks. The form checks the same rules as the API. | Trip → order panel → Proof of delivery |
+| **Add POD photos later.** Up to 8 photos in total. Existing photos can be opened. | Same panel |
+| **POD remarks shown**, and other roles see a note explaining who resolves disputes | Same panel |
+| **Order drawer lists the order's paperwork**: E-Way Bills, LRs (Draft / Final / Cancelled) and PODs, each linked to its record or PDF. Only roles with `shipments:read` see it. | Orders → open an order |
+| **POD edits are race-safe.** The update applies only to the version that was checked (same `updatedAt`), with its history entry in the same transaction. Otherwise it returns 409. | `pods.routes.ts` |
+| **POD photo uploads are all-or-nothing.** A storage failure removes the photos already stored by that request. | `pods.routes.ts` |
+| **E-Way Bill file uploads lock the record.** A cancellation either waits for the upload or wins first, and then the upload gets 409. Two simultaneous uploads can't exceed the 5-file limit. Objects already stored are removed on failure. | `ewayBills.routes.ts` |
+
 ## Database
 
 There is one new migration, **`20261119120000_transport_documents_lifecycle`**. It is additive and only adds nullable columns:
@@ -74,7 +88,7 @@ Existing LRs become drafts. Company settings gain the JSON key `transportDocumen
 | Database | What happened |
 |---|---|
 | `raahsetu_test` | Rebuilt by the test setup from all committed migrations, including the new one. It applied cleanly. |
-| `raahsetu_dev` | **Not migrated.** Exactly one migration is pending there: `20261119120000_transport_documents_lifecycle` (checked read-only; all earlier migrations are applied). The new screens need it. Waiting for your approval and a backup. |
+| `raahsetu_dev` | **Migrated on 19 Nov 2026**, after a verified backup (`C:\Users\Ayush Mishra\RaahSetu-backups\raahsetu_dev-before-transport_documents_lifecycle-20261119-230052.dump`). All 5 migrations are applied and the company count is unchanged (2). |
 | `raahsetu` (protected) | Not touched |
 | Production (Neon) | Not touched |
 
@@ -85,17 +99,17 @@ All of these were run on 19 November 2026 against the working tree.
 | Check | Result |
 |---|---|
 | Backend typecheck and lint | ✅ clean |
-| Backend tests: unit and integration (`raahsetu_test`) | ✅ **247 passed**. 5 are new lifecycle tests covering edit, add files, cancel with a reason, refusals after cancel, history, LR advance rules, finalize lock, terms snapshot, cancel after finalize, and cross-tenant and driver isolation. |
+| Backend tests: unit and integration (`raahsetu_test`) | ✅ **unit 167 passed; integration 88 passed** (two consecutive runs, 0 failed, 0 skipped). This includes the race tests: simultaneous E-Way Bill cancels, edit vs cancel, upload vs cancel, simultaneous uploads against the file limit, and concurrent POD dispute resolution. |
 | Frontend typecheck and lint (`--max-warnings=0`) | ✅ clean |
 | Frontend unit tests | ✅ **99 passed**, including new breadcrumb tests |
 | Frontend production build | ✅ the new routes build |
-| Browser tests, mocked API, Edge, production build | ✅ **239 passed**, 0 failed, 85 skipped (existing project-specific skips). 10 are new: the register, E-Way Bill detail, edit, add files and cancel, the read-only role, LR detail, edit, finalize and cancel, and the trip-panel links. |
+| Browser tests, mocked API, Edge, production build | ✅ **245 passed**, 0 failed, 85 skipped. The skips are intentional: 84 screenshot-capture tests run only with `SCREENSHOT_DIR`, and 1 component-catalogue test is dev-only. Coverage includes the register, E-Way Bill and LR pages, role-specific links, dispute resolution, adding POD photos and the order drawer's documents. |
 | `npm audit --omit=dev` (backend and frontend) | ✅ **0 vulnerabilities** |
 | `npm audit` including dev dependencies | ⚠️ 7 moderate, in `minimatch` inside the `typescript-eslint` lint tooling. Dev-only and not shipped. Left for a separate tooling upgrade. |
 
 ## Not verified
 
-- The new screens against a **real backend in a browser**. Browser tests use a mocked API, and integration tests cover the real API. `raahsetu_dev` doesn't have the pending `20261119120000_transport_documents_lifecycle` migration yet, so nothing was tested end to end against it.
+- The new screens against a **real backend in a browser**. Browser tests use a mocked API, and integration tests cover the real API. `raahsetu_dev` is now migrated, but the browser check against it needs a manual login, which hasn't happened yet.
 - **Backblaze B2 through the UI.** The session was paused before login. Only the B2 storage self-test (`storage:check`) has passed.
 - **Print layout** of the PDF on paper. The PDF is generated and checked to be a valid PDF; how it looks was not checked.
 

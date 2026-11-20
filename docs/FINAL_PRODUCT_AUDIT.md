@@ -79,7 +79,7 @@ Classification used:
 | Feature | Status | Notes |
 |---|---|---|
 | Create, edit, cancel and list | Complete | `/orders` |
-| Order detail page | Backend only | `GET /orders/:id` exists, but there is no page; orders are seen only in lists and on trips |
+| Order detail | Complete *(corrected)* | The Orders page has a detail drawer (`?open=<id>`) with details, trips and editing. The original audit missed it. Since Phase 3a it also lists the order's E-Way Bills, LRs and PODs. |
 | Customer, pickup and drop, weight, priority, time window, declared value, notes | Complete | |
 | Consignee separate from customer; goods description; dimensions; loading details | Missing | |
 | Freight amount, advance, oil money, expenses, payment status | Missing | No financial fields on orders or trips |
@@ -158,3 +158,44 @@ Classification used:
 6. **Open. Missing models.** There are no payment, expense or invitation models. These are larger features, listed in the roadmap.
 
 No feature was found to be "frontend only", and no secrets were found in frontend code or logs.
+
+## Master completion checklist (updated 19 November 2026, after Phase 2 and Phase 3a)
+
+Classification:
+- **COMPLETE**: works end to end in the UI, and automated tests cover it.
+- **PARTIAL**: usable, but parts listed in the brief are missing.
+- **MISSING**: not built.
+- **NEEDS VERIFICATION**: built and tested with automated tests, but not yet exercised against real infrastructure.
+
+**No area is currently classified BROKEN.**
+
+| Area | Status | Evidence / gap |
+|---|---|---|
+| Registration, login, logout, cookie session, change password | COMPLETE | Integration tests (auth) and browser tests |
+| Tenant isolation, backend RBAC | COMPLETE | Every query is scoped by company. Cross-company 404 and role 403 tests exist for each document module. |
+| User management | PARTIAL | Admins create users with a password. No email invitations or password reset (needs a mail provider: paid, needs approval). |
+| Company profile and settings, compliance policy, LR terms | COMPLETE | Settings tabs; settings merge tests |
+| Audit log | COMPLETE | `/audit` page. Document history for E-Way Bills and LRs. Each POD change is logged with its before/after values. |
+| Vehicles: create, edit, delete, status, ownership, FASTag, documents | COMPLETE | |
+| Vehicles: model, body type, dimensions, photo gallery | MISSING | Needs a schema change |
+| Drivers: profile, licence, privacy-first KYC, documents, history | COMPLETE | KYC redaction integration tests |
+| Orders: create, edit, cancel, detail drawer | COMPLETE | |
+| Orders: consignee, goods dimensions, freight, advance, payment status | MISSING | Needs a schema change. LRs carry freight, advance and balance per document. |
+| Trips: manual and OptiRoute creation, assignment checks, status flow, stop actions, QR | COMPLETE | |
+| Trip expenses and driver advances (oil money, tolls) | MISSING | Needs a new model |
+| OptiRoute: 3 algorithms, constraints, explanations, compare runs | COMPLETE | Uses no live traffic, and doesn't claim to |
+| GreenFleet estimates | COMPLETE | Labelled as estimates. Uses settings factors. |
+| Control Tower: counts, live trips, alerts, expiries | COMPLETE | Data comes from the database. Positions are simulated and labelled as such, with no GPS. |
+| E-Way Bill: record, view, edit, add files, cancel with reason, history, register | COMPLETE | Edit, cancel and add-files are race-safe. RaahSetu records E-Way Bills only. |
+| LR: draft, edit, finalize, cancel; advance and balance; company terms; PDF | COMPLETE | |
+| Delivery challan and invoice: draft, issue, paid, cancel, PDF, print, QR | COMPLETE | |
+| Invoice payment records, outstanding balances | MISSING | "Mark paid" sets a status only. Needs a payment model. |
+| POD: record, five outcomes, signature and photos, PDF | COMPLETE | |
+| POD: dispute resolution UI, add photos later | COMPLETE *(Phase 3a)* | Guarded update. Photo uploads are all-or-nothing. |
+| Compliance: requirements, expiry and missing states, dispatch blocking | COMPLETE | |
+| Notifications | PARTIAL | Control Tower alerts and expiry alerts only. No notification centre and no email or SMS (would need paid services). |
+| List pagination | PARTIAL | Pagination happens in the browser. The APIs cap lists at 500 rows (enough for a demo; server-side paging is a later item). |
+| Document storage: private bucket, signed links, validation | COMPLETE | Unit and integration tests run on local storage. The B2 dev self-test (`storage:check`) passed. |
+| B2 through the real UI | NEEDS VERIFICATION | Needs your manual login in a test browser |
+| New screens against a real backend in a browser | NEEDS VERIFICATION | Browser tests use a mocked API, and integration tests cover the real API separately. `raahsetu_dev` is now migrated, so this can be done after the manual login. |
+| PDF print layout on paper | NEEDS VERIFICATION | PDF text and structure are tested automatically; the look on paper isn't. |

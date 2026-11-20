@@ -42,8 +42,8 @@ These are defaults. Each one can be changed later.
 
 | Item | Size | Notes |
 |---|---|---|
-| Order detail page (documents, trips, POD, history) | M | Uses the existing `GET /orders/:id` |
-| POD dispute resolution and adding photos later in the UI | S | Backend already exists |
+| ✅ Order detail | — | Already existed as the Orders drawer (the audit missed it). Phase 3a added the order's E-Way Bills, LRs and PODs to it. |
+| ✅ POD dispute resolution and adding photos later in the UI | — | Done in Phase 3a, with race-safe POD updates |
 | Order financials: freight, advance, payment status; consignee and goods fields | L | Schema change |
 | Trip expenses and driver advances (fuel, toll, oil money) | L | New model, plus screens and permissions |
 | Invoice payment records and outstanding balances on the dashboard | L | New model |

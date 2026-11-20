@@ -3,7 +3,7 @@
 import { ChevronRight, Download, FilePlus2, FileSignature, FileText, FolderArchive, Paperclip, ReceiptText, ShieldAlert, ShieldCheck, Truck } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { ApiError, errorMessage } from "@/lib/api";
+import { api, ApiError, errorMessage } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, humanize } from "@/lib/format";
 import type { PodStatus, TripDocuments as Docs } from "@/lib/types";
 import { openAttachment, PHOTO_MIME, uploadWithProgress } from "@/lib/upload";
@@ -90,7 +90,7 @@ export function TripDocuments({ tripId, tripStatus, onChanged }: { tripId: numbe
 function OrderPanel({ o, tripId, tripStatus, shipment, onChanged }: { o: OrderDocs; tripId: number; tripStatus: string; shipment?: Docs["compliance"]["shipments"][number]["ewayBill"]; onChanged: () => void }) {
   const { can } = useAuth();
   const toast = useToast();
-  const [dialog, setDialog] = useState<"ewb" | "lr" | "pod" | null>(null);
+  const [dialog, setDialog] = useState<"ewb" | "lr" | "pod" | "resolve" | "photos" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // A POD is recorded at a drop that is still open (or completed without one). Skipped stops
   // (pickup skipped / trip cancelled) are not offered: the order has gone back to planning.
@@ -189,6 +189,31 @@ function OrderPanel({ o, tripId, tripStatus, shipment, onChanged }: { o: OrderDo
                 </a>
                 <Badge color="gray">{o.pod.attachments.filter((a) => a.role === "PHOTO").length} photo(s)</Badge>
               </div>
+              {o.pod.remarks && <p className="mt-1 text-xs text-muted">Remarks: {o.pod.remarks}</p>}
+              {o.pod.attachments.some((a) => a.role === "PHOTO") && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {o.pod.attachments
+                    .filter((a) => a.role === "PHOTO")
+                    .map((a, i) => (
+                      <Button key={a.id} size="sm" variant="ghost" icon={Paperclip} onClick={() => void open(a.id)} aria-label={`Open delivery photo ${i + 1}`}>
+                        Photo {i + 1}
+                      </Button>
+                    ))}
+                </div>
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {o.pod.status === "DISPUTED" && can("pod:resolve") && (
+                  <Button size="sm" onClick={() => setDialog("resolve")}>
+                    Resolve dispute
+                  </Button>
+                )}
+                {can("pod:write") && o.pod.attachments.filter((a) => a.role === "PHOTO").length < 8 && (
+                  <Button size="sm" variant="secondary" icon={FilePlus2} onClick={() => setDialog("photos")}>
+                    Add photos
+                  </Button>
+                )}
+              </div>
+              {o.pod.status === "DISPUTED" && !can("pod:resolve") && <p className="mt-1 text-xs text-muted">A manager or admin resolves disputed deliveries.</p>}
             </div>
           ) : (
             <p className="text-xs text-muted">{tripStatus === "IN_TRANSIT" ? "Record when the goods are handed over." : tripStatus === "COMPLETED" ? "No POD was recorded." : "Available once the trip is in transit."}</p>
@@ -210,6 +235,12 @@ function OrderPanel({ o, tripId, tripStatus, shipment, onChanged }: { o: OrderDo
       <Modal open={dialog === "pod"} title={`Proof of delivery · ${o.orderNumber}`} onClose={() => setDialog(null)} wide>
         {dialog === "pod" && <PodForm o={o} tripId={tripId} onSaved={(message) => { setDialog(null); toast.success(message ?? "Delivery recorded"); onChanged(); }} />}
       </Modal>
+      <Modal open={dialog === "resolve"} title={`Resolve disputed delivery · ${o.orderNumber}`} onClose={() => setDialog(null)}>
+        {dialog === "resolve" && o.pod && <PodResolveForm pod={o.pod} orderedKg={o.weightKg} onSaved={() => { setDialog(null); toast.success("Dispute resolved"); onChanged(); }} />}
+      </Modal>
+      <Modal open={dialog === "photos"} title={`Add delivery photos · ${o.orderNumber}`} onClose={() => setDialog(null)}>
+        {dialog === "photos" && o.pod && <PodPhotosForm pod={o.pod} onSaved={() => { setDialog(null); toast.success("Photos added"); onChanged(); }} />}
+      </Modal>
     </Card>
   );
 }
@@ -218,6 +249,91 @@ function useForm<T extends Record<string, string>>(init: T) {
   const [f, setF] = useState(init);
   const set = (k: keyof T) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
   return [f, set, setF] as const;
+}
+
+/**
+ * Resolve a DISPUTED delivery (pod:resolve). The outcome can move to delivered in full or partially;
+ * moving between delivered and not-delivered is not allowed (that would change the stop outcome).
+ */
+function PodResolveForm({ pod, orderedKg, onSaved }: { pod: NonNullable<OrderDocs["pod"]>; orderedKg: number; onSaved: () => void }) {
+  const [f, set] = useForm({
+    status: "DELIVERED",
+    remarks: "",
+    deliveredQuantity: pod.deliveredQuantity != null ? String(pod.deliveredQuantity) : "",
+    shortageDetails: pod.shortageDetails ?? "",
+    damageDetails: pod.damageDetails ?? "",
+  });
+  const partial = f.status === "PARTIALLY_DELIVERED";
+  return (
+    <FormShell
+      submitLabel="Resolve dispute"
+      onSubmit={async () => {
+        if (f.remarks.trim().length < 3) throw new Error("Explain how the dispute was resolved.");
+        const qty = f.deliveredQuantity.trim() ? Number(f.deliveredQuantity) : null;
+        if (partial) {
+          if (qty == null) throw new Error("Enter the delivered quantity for a partial delivery.");
+          if (qty >= orderedKg) throw new Error(`A partial delivery must be less than the ordered ${orderedKg} kg.`);
+          if (!f.shortageDetails.trim() && !f.damageDetails.trim()) throw new Error("Describe the shortage or damage.");
+        } else if (qty != null && qty > orderedKg) throw new Error(`Delivered quantity cannot exceed the ordered ${orderedKg} kg.`);
+        await api(`/pods/${pod.id}`, {
+          method: "PATCH",
+          body: { status: f.status, remarks: f.remarks.trim(), deliveredQuantity: qty, shortageDetails: f.shortageDetails.trim() || null, damageDetails: f.damageDetails.trim() || null },
+        });
+        onSaved();
+      }}
+    >
+      <p className="text-sm text-muted">Record the agreed outcome. The previous details and your remarks are kept in the delivery&apos;s audit history.</p>
+      <Field label="Agreed outcome" required>
+        <Select value={f.status} onChange={set("status")}>
+          <option value="DELIVERED">Delivered in full</option>
+          <option value="PARTIALLY_DELIVERED">Partially delivered</option>
+        </Select>
+      </Field>
+      <Field label={partial ? "Delivered quantity (kg)" : "Delivered quantity (kg, optional)"} required={partial} hint={`Ordered: ${fmtNum(orderedKg, "kg")}`}>
+        <Input type="number" min={0} step="any" value={f.deliveredQuantity} onChange={set("deliveredQuantity")} />
+      </Field>
+      {partial && (
+        <>
+          <Field label="Shortage details">
+            <Textarea rows={2} value={f.shortageDetails} onChange={set("shortageDetails")} maxLength={1000} />
+          </Field>
+          <Field label="Damage details">
+            <Textarea rows={2} value={f.damageDetails} onChange={set("damageDetails")} maxLength={1000} />
+          </Field>
+        </>
+      )}
+      <Field label="Resolution remarks" required>
+        <Textarea rows={3} required value={f.remarks} onChange={set("remarks")} maxLength={1000} />
+      </Field>
+    </FormShell>
+  );
+}
+
+/** Add delivery photographs after the POD was recorded (8 photos at most; the signature never changes). */
+function PodPhotosForm({ pod, onSaved }: { pod: NonNullable<OrderDocs["pod"]>; onSaved: () => void }) {
+  const [photos, setPhotos] = useState<PickedFile[]>([]);
+  const [progress, setProgress] = useState<number | null>(null);
+  const have = pod.attachments.filter((a) => a.role === "PHOTO").length;
+  return (
+    <FormShell
+      submitLabel="Upload photos"
+      onSubmit={async () => {
+        if (!photos.length) throw new Error("Choose at least one photo.");
+        const form = new FormData();
+        for (const p of photos) form.append("photos", p.file, p.file.name);
+        setProgress(0);
+        try {
+          await uploadWithProgress(`/pods/${pod.id}/photos`, form, setProgress);
+        } finally {
+          setProgress(null);
+        }
+        onSaved();
+      }}
+    >
+      <FileCapture label="Delivery photos" value={photos} onChange={setPhotos} max={Math.min(5, 8 - have)} allowed={PHOTO_MIME} allowPdf={false} hint={`${have} of 8 photos attached. Goods, packaging, any damage.`} />
+      <UploadProgress fraction={progress} />
+    </FormShell>
+  );
 }
 
 const POD_STATUSES: Array<[PodStatus, string]> = [

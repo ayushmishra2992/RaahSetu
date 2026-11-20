@@ -693,5 +693,74 @@ describe.skipIf(!enabled)("transport documents, compliance and POD (integration)
       expect(actions).toEqual(["ewaybill.recorded"]); // none of the refused requests wrote history
       expect((await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A))).body.status).toBe("ACTIVE");
     });
+
+    it("never attaches files to an E-Way Bill whose cancellation won a race with the upload", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic upload race" };
+      for (let round = 0; round < 3; round++) {
+        const created = await request(app).post("/api/eway-bills").set(auth(manager)).send({ ...base, ewbNumber: `39100000005${round}` });
+        expect(created.status, JSON.stringify(created.body)).toBe(201);
+        const ewb = created.body.id as number;
+        const [upload, cancel] = await Promise.all([
+          request(app).post(`/api/eway-bills/${ewb}/files`).set(auth(manager)).attach("file", PDF, { filename: "race.pdf", contentType: "application/pdf" }),
+          request(app).post(`/api/eway-bills/${ewb}/cancel`).set(auth(A)).send({ reason: "Synthetic upload-vs-cancel" }),
+        ]);
+        expect(cancel.status).toBe(200);
+        expect([201, 409]).toContain(upload.status);
+        const stored = (await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A))).body;
+        const actions = ((await request(app).get(`/api/eway-bills/${ewb}/history`).set(auth(A))).body as Array<{ action: string }>).map((e) => e.action);
+        if (upload.status === 201) {
+          expect(stored.attachments).toHaveLength(1);
+          expect(actions).toEqual(["ewaybill.cancelled", "file.uploaded", "ewaybill.recorded"]); // upload landed BEFORE the cancellation
+        } else {
+          expect(stored.attachments).toHaveLength(0);
+          expect(actions).toEqual(["ewaybill.cancelled", "ewaybill.recorded"]);
+        }
+      }
+    });
+
+    it("keeps the 5-file limit when uploads to one E-Way Bill run at the same time", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic limit race" };
+      const created = await request(app).post("/api/eway-bills").set(auth(manager)).send({ ...base, ewbNumber: "391000000044" });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const ewb = created.body.id as number;
+      const three = () => {
+        const r = request(app).post(`/api/eway-bills/${ewb}/files`).set(auth(manager));
+        for (let i = 0; i < 3; i++) r.attach("file", PDF, { filename: `p${i}.pdf`, contentType: "application/pdf" });
+        return r;
+      };
+      const results = await Promise.all([three(), three()]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 400]);
+      expect((await request(app).get(`/api/eway-bills/${ewb}`).set(auth(A))).body.attachments).toHaveLength(3);
+    });
+
+    it("adds POD photos later, scoped to the company, and records it", async () => {
+      const before = (await request(app).get(`/api/pods/${id.pod}`).set(auth(A))).body.attachments.filter((a: { role: string }) => a.role === "PHOTO").length;
+      expect((await request(app).post(`/api/pods/${id.pod}/photos`).set(auth(B)).attach("photos", JPG, { filename: "x.jpg", contentType: "image/jpeg" })).status).toBe(404);
+      expect((await request(app).post(`/api/pods/${id.pod}/photos`).set(auth(employee)).attach("photos", JPG, { filename: "x.jpg", contentType: "image/jpeg" })).status).toBe(403);
+      expect((await request(app).post(`/api/pods/${id.pod}/photos`).set(auth(manager)).attach("photos", PDF, { filename: "x.pdf", contentType: "application/pdf" })).status).toBe(400);
+      const r = await request(app).post(`/api/pods/${id.pod}/photos`).set(auth(manager)).attach("photos", JPG, { filename: "later.jpg", contentType: "image/jpeg" });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      const after = (await request(app).get(`/api/pods/${id.pod}`).set(auth(A))).body.attachments.filter((a: { role: string }) => a.role === "PHOTO").length;
+      expect(after).toBe(before + 1);
+      const log = (await request(app).get(`/api/audit?entityType=ProofOfDelivery&entityId=${id.pod}`).set(auth(A))).body as Array<{ action: string }>;
+      expect(log.some((e) => e.action === "pod.photos_added")).toBe(true);
+    });
+
+    it("resolves a disputed POD without lost updates: every successful edit has exactly one history entry", async () => {
+      expect((await request(app).patch(`/api/pods/${id.pod}`).set(auth(dispatcher)).send({ status: "DISPUTED", remarks: "Synthetic: customer disputes again" })).status).toBe(200);
+      const countUpdates = async () => ((await request(app).get(`/api/audit?entityType=ProofOfDelivery&entityId=${id.pod}&limit=500`).set(auth(A))).body as Array<{ action: string }>).filter((e) => e.action === "pod.updated").length;
+      const before = await countUpdates();
+      const payloads = [
+        { status: "DELIVERED", deliveredQuantity: null, shortageDetails: null, damageDetails: null, remarks: "Synthetic: resolved by manager, full delivery" },
+        { status: "PARTIALLY_DELIVERED", deliveredQuantity: 900, shortageDetails: "Synthetic shortage", damageDetails: null, remarks: "Synthetic: resolved by admin, partial" },
+      ];
+      const [m, a] = await Promise.all([request(app).patch(`/api/pods/${id.pod}`).set(auth(manager)).send(payloads[0]), request(app).patch(`/api/pods/${id.pod}`).set(auth(A)).send(payloads[1])]);
+      const ok = [m, a].filter((r) => r.status === 200).length;
+      expect(ok).toBeGreaterThanOrEqual(1);
+      for (const r of [m, a]) expect([200, 409]).toContain(r.status);
+      expect((await countUpdates()) - before).toBe(ok); // no phantom or missing history
+      const final = (await request(app).get(`/api/pods/${id.pod}`).set(auth(A))).body;
+      expect(payloads.some((pl) => pl.status === final.status && pl.remarks === final.remarks)).toBe(true); // one submission fully applied, not a mix
+    });
   });
 });
