@@ -16,8 +16,14 @@ import { InstanceError, solve } from "../../optimizer/solver";
 import type { Instance, OptLocation, OptOrder, OptVehicle, Solution } from "../../optimizer/types";
 import { createTripsFromRoutes, lockFleet } from "../trips/tripFactory";
 import { costModelFrom, getCompanySettings, weightsFrom, WeightsSchema } from "../company/settings";
+import { redactCompliance, type ComplianceVisibility } from "../compliance/compliance";
+import { driverCompliance, vehicleCompliance } from "../compliance/compliance.service";
 
-export const COMPLIANCE_BLOCKING_TYPES = ["RC", "INSURANCE", "PUC", "FITNESS", "PERMIT"] as const;
+/**
+ * Exclusion reasons are saved in optimisation plans and returned in manual-trip
+ * 422s, both readable by roles without kyc:read: never include KYC detail there.
+ */
+const PLAN_VISIBILITY: ComplianceVisibility = { kyc: false, documents: true };
 
 export const OptimizeRequestSchema = z.object({
   name: z.string().trim().max(120).optional(),
@@ -161,7 +167,7 @@ export async function buildInstance(companyId: number, req: OptimizeRequest, ove
     const missing = vehicleIds.filter((id) => !found.has(id));
     if (missing.length) throw badRequest(`Vehicles not found: ${missing.join(", ")}`);
   }
-  const drivers = await prisma.driver.findMany({ where: { companyId }, orderBy: { id: "asc" } });
+  const drivers = await prisma.driver.findMany({ where: { companyId }, include: { documents: true }, orderBy: { id: "asc" } });
   // In live mode a vehicle/driver with an unfinished trip is not free, even before dispatch.
   const activeTrips =
     overrides.mode === "live"
@@ -190,11 +196,12 @@ export async function buildInstance(companyId: number, req: OptimizeRequest, ove
       exclusions.push({ kind: "VEHICLE", id: v.id, label, reason: "No depot location assigned" });
       continue;
     }
-    const expired = v.documents.find(
-      (d) => (COMPLIANCE_BLOCKING_TYPES as readonly string[]).includes(d.type) && d.expiresOn && d.expiresOn < planStart,
-    );
-    if (expired) {
-      exclusions.push({ kind: "VEHICLE", id: v.id, label, reason: `${expired.type} expired on ${expired.expiresOn!.toISOString().slice(0, 10)}` });
+    // Central compliance engine: required documents valid at plan start, per company policy.
+    // The reason is stored in the plan and shown to every role that can read plans, so
+    // it is always KYC-redacted (eligibility itself is computed from the full result).
+    const compliance = redactCompliance(vehicleCompliance(v, settings, planStart), PLAN_VISIBILITY);
+    if (!compliance.eligible) {
+      exclusions.push({ kind: "VEHICLE", id: v.id, label, reason: compliance.blockers.join("; ") });
       continue;
     }
     if (busyVehicle.has(v.id)) {
@@ -212,7 +219,8 @@ export async function buildInstance(companyId: number, req: OptimizeRequest, ove
     if (overrides.mode === "live" && d.status !== "AVAILABLE") return `Driver status is ${d.status}`;
     if (busyDriver.has(id)) return `Already on trip ${busyDriver.get(id)}`;
     if (d.status === "INACTIVE") return "Driver is inactive";
-    if (d.licenseExpiry < planStart) return `Driving licence expired on ${d.licenseExpiry.toISOString().slice(0, 10)}`;
+    const compliance = redactCompliance(driverCompliance(d, settings, planStart), PLAN_VISIBILITY);
+    if (!compliance.eligible) return compliance.blockers.join("; ");
     return null;
   };
   const requested = new Map(

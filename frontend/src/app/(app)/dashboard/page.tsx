@@ -22,6 +22,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { ComplianceOverviewCard } from "@/components/ComplianceOverviewCard";
 import { MapLegend, RouteMap, routeColor, type MapLine, type MapPoint } from "@/components/RouteMap";
 import {
   Badge,
@@ -310,6 +311,8 @@ export default function ControlTowerPage() {
           </Card>
         </div>
       </div>
+
+      {can("documents:read") && <ComplianceOverviewCard limit={5} />}
 
       <section aria-label="Fleet and pipeline" className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
         <Card title="Vehicles" description={`${sum(data.counts.vehicles)} in fleet`}>

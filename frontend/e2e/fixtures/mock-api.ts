@@ -72,6 +72,10 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
       "/api/audit": () => F.auditEvents,
       "/api/greenfleet/summary": () => F.greenSummary,
       "/api/fuel-records": () => F.fuelRecords,
+      "/api/compliance/overview": () => F.complianceOverview,
+      "/api/eway-bills": () => F.ewayBills,
+      "/api/lorry-receipts": () => F.lorryReceipts,
+      "/api/pods": () => F.pods,
       "/api/places/status": () => F.placesStatus,
       "/api/places/reverse": () => F.reverseFor(Number(q.get("lat")), Number(q.get("lng"))),
       "/api/places/autocomplete": () => {
@@ -83,6 +87,16 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
     if (path === "/api/road-network/path")
       return { body: { found: true, distanceKm: 37, minutes: 49, nodeIds: [1, 2, 3, 4], edgeIds: [1, 2, 3], nodeNames: ["Bhiwandi Jn", "Thane Jn", "Airoli Jn", "Vashi Jn"], comparison: { astar: { expandedNodes: 4, runtimeMs: 0.12 }, dijkstra: { expandedNodes: 6, runtimeMs: 0.2 } } } };
     if (/^\/api\/trips\/\d+\/qr$/.test(path) || /^\/api\/billing\/\d+\/qr$/.test(path)) return { body: { url: "http://localhost:3000/verify/fixture-token", dataUrl: F.TINY_PNG } };
+    if (/^\/api\/trips\/\d+\/documents$/.test(path)) return { body: F.tripDocuments };
+    if (/^\/api\/(eway-bills|lorry-receipts)\/\d+\/history$/.test(path)) return { body: F.docHistory };
+    if (/^\/api\/eway-bills\/\d+$/.test(path)) {
+      const e = F.ewayBills.find((x) => x.id === id);
+      return e ? { body: e } : { status: 404, body: { error: { message: "E-Way Bill not found" } } };
+    }
+    if (/^\/api\/lorry-receipts\/\d+$/.test(path)) {
+      const l = F.lorryReceipts.find((x) => x.id === id);
+      return l ? { body: l } : { status: 404, body: { error: { message: "Lorry receipt not found" } } };
+    }
     if (/^\/api\/trips\/\d+$/.test(path)) return { body: { ...F.trip, id } };
     if (/^\/api\/optiroute\/runs\/\d+$/.test(path)) return { body: { ...F.run, id } };
     if (/^\/api\/orders\/\d+$/.test(path)) {
@@ -90,8 +104,8 @@ function fixtureFor(method: string, path: string, q: URLSearchParams, role: F.Ro
       const o = id === 99 ? { ...F.orders[3], id: 99 } : F.orders.find((x) => x.id === id);
       return o ? { body: { ...o, tripStops: id <= 3 ? [{ id: 10 + id, type: "PICKUP", trip: { id: 1, tripNumber: "TRP-QA0001", status: "IN_TRANSIT" } }] : [] } } : { status: 404, body: { error: { message: "Order not found" } } };
     }
-    if (/^\/api\/vehicles\/\d+$/.test(path)) return { body: F.vehicleDetail };
-    if (/^\/api\/drivers\/\d+$/.test(path)) return { body: F.driverDetail };
+    if (/^\/api\/vehicles\/\d+$/.test(path)) return { body: { ...F.vehicleDetail, compliance: F.vehicleCompliance } };
+    if (/^\/api\/drivers\/\d+$/.test(path)) return { body: { ...F.driverDetail, compliance: F.driverCompliance } };
     if (/^\/api\/billing\/\d+$/.test(path)) return { body: F.billingDocs.find((d) => d.id === id) ?? F.billingDocs[0] };
     if (/^\/api\/scenarios\/\d+$/.test(path)) return { body: { ...F.scenarios[0], baseRun: F.run, resultRun: { ...F.run, id: 2 } } };
     return undefined;

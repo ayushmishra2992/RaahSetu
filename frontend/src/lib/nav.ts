@@ -17,6 +17,7 @@ import {
   Settings,
   ShieldCheck,
   Truck,
+  FileStack,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +41,7 @@ export const NAV: NavGroup[] = [
       { href: "/dashboard", label: "Control Tower", icon: LayoutDashboard, permission: "dashboard:read" },
       { href: "/orders", label: "Orders", icon: Package, permission: "orders:read" },
       { href: "/trips", label: "Trips & Dispatch", icon: Navigation, permission: "trips:read" },
+      { href: "/transport-documents", label: "Transport Documents", icon: FileStack, permission: "shipments:read" },
       { href: "/optiroute", label: "OptiRoute", icon: Route, permission: "optimize:read" },
       { href: "/scenarios", label: "Scenarios", icon: FlaskConical, permission: "optimize:read" },
     ],
@@ -108,6 +110,8 @@ const SUB_PAGES: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^\/vehicles\/(\d+)$/, () => "Vehicle details"],
   [/^\/drivers\/(\d+)$/, () => "Driver profile"],
   [/^\/billing\/(\d+)$/, () => "Document"],
+  [/^\/transport-documents\/eway-bills\/(\d+)$/, () => "E-Way Bill"],
+  [/^\/transport-documents\/lorry-receipts\/(\d+)$/, () => "Lorry receipt"],
 ];
 
 /** Breadcrumb trail for a path: group › section › sub-page. */

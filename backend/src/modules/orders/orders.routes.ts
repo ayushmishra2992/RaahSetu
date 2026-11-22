@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../config/prisma";
 import { audit } from "../../lib/audit";
-import { badRequest, conflict, notFound } from "../../lib/errors";
+import { AppError, badRequest, conflict, notFound } from "../../lib/errors";
 import { authOf } from "../../lib/http";
 import { docNumber } from "../../lib/numbering";
 import { parseBody, parseId, parsePatch, parseQuery, zOptionalDate } from "../../lib/validate";
@@ -104,9 +104,19 @@ router.post("/:id/cancel", requirePermission("orders:write"), async (req, res) =
 router.delete("/:id", requirePermission("orders:write"), async (req, res) => {
   const auth = authOf(req);
   const id = parseId(req.params.id);
-  const existing = await prisma.order.findFirst({ where: { id, companyId: auth.companyId }, include: { _count: { select: { tripStops: true } } } });
+  const existing = await prisma.order.findFirst({
+    where: { id, companyId: auth.companyId },
+    include: { _count: { select: { tripStops: true, ewayBills: true, lorryReceipts: true } } },
+  });
   if (!existing) throw notFound("Order");
   if (existing._count.tripStops > 0) throw conflict("Order is part of a trip and cannot be deleted");
+  // E-Way Bills and lorry receipts (even cancelled ones) are shipment records with
+  // stored files; deleting the order would cascade them away. Keep them: cancel instead.
+  const { ewayBills, lorryReceipts } = existing._count;
+  if (ewayBills || lorryReceipts) {
+    const what = [ewayBills ? `${ewayBills} E-Way Bill${ewayBills === 1 ? "" : "s"}` : null, lorryReceipts ? `${lorryReceipts} lorry receipt${lorryReceipts === 1 ? "" : "s"}` : null].filter(Boolean).join(" and ");
+    throw new AppError(409, `Order has ${what} recorded and cannot be deleted. Use "Cancel order" instead; shipment records are kept.`, "ORDER_HAS_SHIPMENT_DOCUMENTS", { ewayBills, lorryReceipts });
+  }
   await prisma.order.delete({ where: { id } });
   await audit(auth, "order.deleted", "Order", id, { orderNumber: existing.orderNumber });
   res.status(204).end();

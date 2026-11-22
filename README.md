@@ -15,7 +15,7 @@ Plan which truck serves which orders without breaking capacity, delivery-window 
 ![Prisma](https://img.shields.io/badge/Prisma-7-2d3748)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-[Installation](docs/INSTALLATION.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Database](docs/DATABASE.md) · [Security](docs/SECURITY.md) · [Testing](docs/TESTING.md) · [Deployment](docs/DEPLOYMENT.md) · [OptiRoute](docs/OPTIROUTE.md)
+[Installation](docs/INSTALLATION.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Database](docs/DATABASE.md) · [Security](docs/SECURITY.md) · [Testing](docs/TESTING.md) · [Deployment](docs/DEPLOYMENT.md) · [OptiRoute](docs/OPTIROUTE.md) · [Documents & compliance](docs/DOCUMENTS_AND_COMPLIANCE.md)
 
 ![Control Tower](docs/screenshots/control-tower.png)
 
@@ -48,8 +48,9 @@ Everything below is implemented in this repository (see the module column for wh
 | Module | What it does | Code |
 |---|---|---|
 | **Control Tower** | KPIs (fleet utilisation, on-time delivery, trips, distance, cost, CO₂ — last 30 days), critical alerts, live operations with simulated positions, orders awaiting planning, compliance expiries, recent activity, fuel & emissions | `frontend/src/app/(app)/dashboard`, `backend/src/modules/controlTower` |
-| **Fleet** | Vehicles (capacity, fuel type, mileage, depot, status), drivers (licence, shift limit, optional link to a driver login) | `vehicles`, `drivers` |
-| **Compliance** | RC, insurance, PUC, fitness, permit and licence records with expiry states; private, signature-checked uploads; expired documents exclude vehicles/drivers from planning | `documents` |
+| **Fleet** | Vehicles (capacity, fuel type, mileage, depot, registration state, ownership/owner, FASTag, status), drivers (licence class, issue/expiry, shift limit, optional driver login) and privacy-first KYC (last 4 ID characters only, recorded consent, admin/manager-only) | `vehicles`, `drivers` |
+| **Documents & compliance** | RC, insurance, PUC, fitness, permits, FASTag, licence (front/back) and KYC documents captured with the phone camera (preview, rotate, compress, progress, retry); admin verification; a configurable compliance engine (compliant / expiring / expired / missing / pending verification, per-vehicle-type and fuel exemptions) enforced in OptiRoute, manual trips and dispatch | `documents`, `compliance`, `attachments` |
+| **Shipment paperwork** | E-Way Bill recording with attachments, editing, extra files, cancellation with a reason and history (no portal integration); lorry receipts (LR/bilty) with advance and balance, draft → final → cancelled, company-set terms and PDFs; a Transport Documents register across trips; delivery challans with HSN codes as PDFs, proof of delivery with on-screen signature and photos, per-trip document section and ZIP pack filtered by role | `shipments`, `billing` |
 | **Locations & roads** | Depots, warehouses and customers on a Leaflet/OpenStreetMap map; editable road graph with one-way/closed segments; shortest path with A* vs Dijkstra comparison | `locations`, `roadNetwork` |
 | **Location search** | Address/landmark autocomplete (LocationIQ, server-side key), draggable pin, "Use pin's address" reverse geocoding with a confirm-before-apply preview, Indian state/UT and PIN normalisation, saved-location suggestions and duplicate warnings | `places`, `PlacePicker`, `LocationForm` |
 | **Orders** | Pickup/drop, weight, priority, ready time, delivery window, service time; create pickup/drop locations inline | `orders` |
@@ -230,7 +231,12 @@ Open <http://localhost:3000>. With the demo data loaded you can log in as `dispa
 | `CORS_ORIGIN` | no | Allowed origin(s), comma-separated (`http://localhost:3000`) |
 | `PUBLIC_APP_URL` | no | Base URL printed in QR codes |
 | `COOKIE_SECURE` | no (`false`) | `true` when served over HTTPS |
-| `UPLOAD_DIR`, `MAX_UPLOAD_MB` | no | Private directory and size limit for compliance uploads |
+| `UPLOAD_DIR`, `MAX_UPLOAD_MB` | no | Private directory (local storage) and size limit for uploads |
+| `STORAGE_DRIVER` | no (`local`) | `local` or `s3` — use `s3` in production; local disk on Render's free plan is wiped on every deploy |
+| `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` | with `s3` | Any S3-compatible **private** bucket — see [docs/DOCUMENTS_AND_COMPLIANCE.md](docs/DOCUMENTS_AND_COMPLIANCE.md#8-document-storage) |
+| `SIGNED_URL_TTL_SECONDS` | no (`300`) | Lifetime of signed document download links |
+| `UPLOAD_RATE_LIMIT_PER_MIN`, `PACK_RATE_LIMIT_PER_MIN` | no (`30`, `6`) | Per-user limits for uploads and trip document packs (both are memory-heavy) |
+| `MAX_PACK_MB` | no (`50`) | Largest trip document pack; further files are listed as omitted in its manifest |
 | `AUTH_RATE_LIMIT_PER_15_MIN` | no (`50`) | Login/registration attempts per IP |
 | `ALLOW_DEMO_SEED` | no (`false`) | Only for a public demo deployment; lets the seed run with `NODE_ENV=production` |
 | `PLACES_PROVIDER` | no (`none`) | `none`, `locationiq` or `geoapify` |
@@ -268,16 +274,17 @@ Base URL: `http://localhost:5000/api` (or `http://localhost:3000/api` through th
 
 | Area | Endpoints |
 |---|---|
-| Public | `GET /health` · `GET /public/verify/:token` |
+| Public | `GET /health` · `GET /public/verify/:token` · `GET /files/:token` (short-lived signed links) |
 | Auth | `POST /auth/register-company` · `POST /auth/login` · `POST /auth/logout` · `GET /auth/me` · `POST /auth/change-password` |
 | Company & users | `GET/PATCH /company` · `GET/POST /users` · `PATCH /users/:id` |
-| Fleet | `/vehicles` · `/drivers` (CRUD) · `/documents` (CRUD + private file download) |
+| Fleet | `/vehicles` · `/drivers` (CRUD, `/kyc`) · `/documents` (CRUD, `/files`, `/verify`) · `/attachments/:id` (`/url`) · `/compliance/overview`, `/compliance/check` |
 | Locations | `/locations` (CRUD) · `/road-network` (nodes, edges, `GET /path`) · `/places/status` · `/places/autocomplete` · `/places/reverse` |
 | Operations | `/orders` · `/trips` (+ `/status`, `/stops/:stopId`, `/qr`) · `/optiroute/meta`, `/optiroute/runs` (+ `/dispatch`) · `/scenarios` (+ `/approve`, `/reject`) |
-| Business | `/billing` (+ `/issue`, `/mark-paid`, `/cancel`, `/qr`) · `/greenfleet/estimate`, `/summary`, `/vehicle/:id` · `/fuel-records` |
+| Shipments | `/eway-bills` · `/lorry-receipts` (+ `/pdf`) · `/pods` (+ `/photos`, `/pdf`) · `/trips/:id/documents` (+ `/pack`) |
+| Business | `/billing` (+ `/issue`, `/mark-paid`, `/cancel`, `/qr`, `/pdf`) · `/greenfleet/estimate`, `/summary`, `/vehicle/:id` · `/fuel-records` |
 | Insight | `GET /control-tower` · `GET /audit` |
 
-Every endpoint with its permission and body: **[docs/API.md](docs/API.md)**.
+Every endpoint with its permission and body: **[docs/API.md](docs/API.md)**. Document, compliance, E-Way Bill, LR, POD and trip-pack endpoints: **[docs/DOCUMENTS_AND_COMPLIANCE.md](docs/DOCUMENTS_AND_COMPLIANCE.md#9-api-summary)**.
 
 ## Authentication & authorisation
 
@@ -328,7 +335,8 @@ Summary — full details in **[docs/SECURITY.md](docs/SECURITY.md)**:
 - Session cookie is `httpOnly`; the API is same-origin through the Next.js proxy; Helmet headers on the API; `nosniff`, `Referrer-Policy` and `X-Frame-Options: DENY` on the web app.
 - Zod validation on every body/query; consistent error format; no stack traces to clients.
 - Tenant isolation and role checks on every route, covered by integration tests.
-- Uploads: type allow-list, file-signature check, size limit, random storage keys, authenticated download only.
+- Uploads: type allow-list, extension and file-signature checks, size limit, random tenant-prefixed storage keys, no public URLs — downloads only through an authorised API call or a short-lived HMAC/presigned link; uploads, link issuance and downloads are audited.
+- Driver KYC: only the last 4 ID characters are stored, a full Aadhaar number is refused, consent is recorded, and KYC fields/documents are hidden from every role except admin and manager.
 - Third-party API keys (LocationIQ) are used only by the backend; the browser bundle contains no server secrets.
 - Rate limits on authentication, public QR verification and location search.
 
@@ -336,13 +344,14 @@ Summary — full details in **[docs/SECURITY.md](docs/SECURITY.md)**:
 
 - **Simulated tracking:** vehicle positions are interpolated from the plan and labelled "simulated"; there is no GPS/telematics integration or notification centre.
 - **Billing:** one GST rate on the subtotal (no CGST/SGST/IGST split, IRN or e-way bill); "Mark paid" records status, not payment amounts.
-- **Compliance:** expiry states come from entered dates; no VAHAN/Sarathi/insurer verification. A stored scan cannot be replaced on edit (add a new document instead).
+- **Compliance:** states come from entered dates and admin verification; no VAHAN/Sarathi/insurer/GST/E-Way Bill portal integration. E-Way Bills are recorded, not generated. Default requirements are a starting point, not legal advice — review *Settings → compliance*.
+- **Documents:** no automatic retention/expiry policy for stored files; existing local files are not migrated when switching to S3.
 - **Audit log:** trip status changes, OptiRoute runs/dispatch and scenario decisions are not yet written to the audit log (trip history is still available on each trip).
 - **Scale:** `GET /orders` is not paginated, `GET /trips` returns the latest 200, OptiRoute runs synchronously inside the request (fine for the benchmarked sizes), Control Tower KPIs use a fixed 30-day window.
 - **Location search:** OpenStreetMap-based data is good for landmarks, localities and PIN codes but weaker for company/warehouse names; a fallback provider for zero-result searches is not enabled.
 - **Maps:** OpenStreetMap's public tile server is for light use — configure another tile provider for production traffic.
 - **Accounts:** no email/SMS, password reset or SSO (admins create users; users change passwords in Settings).
-- **Storage:** uploads go to a local directory (swap `backend/src/modules/documents/storage.ts` for object storage in the cloud).
+- **Storage:** the default `local` driver is **not persistent on Render's free plan**; configure `STORAGE_DRIVER=s3` with a private bucket before relying on uploads in production (the S3 driver is implemented but has not been tested against a real provider).
 - **Hardening:** no Content-Security-Policy header yet; colour-contrast and screen-reader testing still need a manual pass.
 
 ## Roadmap
@@ -352,7 +361,7 @@ Summary — full details in **[docs/SECURITY.md](docs/SECURITY.md)**:
 3. Email/SMS notifications and password reset.
 4. GPS/telematics adapter replacing the simulator (`backend/src/modules/trips/telemetry.ts`).
 5. GST e-invoice / e-way bill integration via a GST Suvidha Provider; CGST/SGST/IGST split.
-6. Object storage for documents; Content-Security-Policy; mobile-first driver app.
+6. Verified S3 storage in production and a document retention policy; Content-Security-Policy; offline-capable driver app.
 
 ## Contributing
 

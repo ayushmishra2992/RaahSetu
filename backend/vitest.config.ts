@@ -21,6 +21,8 @@ export default defineConfig({
       PLACES_API_KEY: "",
       PLACES_FALLBACK_PROVIDER: "none",
       PLACES_FALLBACK_API_KEY: "",
+      // Small pack cap so the size-limit behaviour is tested with ~1 MB of files.
+      MAX_PACK_MB: "1",
     },
     projects: [
       {

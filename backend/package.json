@@ -18,6 +18,7 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "benchmark": "tsx src/scripts/benchmark.ts",
+    "storage:check": "tsx src/scripts/storageCheck.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -30,6 +31,8 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1161.0",
+    "@aws-sdk/s3-request-presigner": "3.1161.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3",
@@ -41,6 +44,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
+    "pdfkit": "0.20.2",
     "pg": "^8.16.3",
     "qrcode": "^1.5.4",
     "zod": "^4.1.12"
@@ -53,6 +57,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
     "@types/node": "^22.18.0",
+    "@types/pdfkit": "0.17.3",
     "@types/pg": "^8.15.5",
     "@types/qrcode": "^1.5.5",
     "@types/supertest": "^6.0.3",

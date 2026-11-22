@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, errorMessage } from "@/lib/api";
 import { fromLocalInput, toLocalInput } from "@/lib/format";
+import { INDIAN_STATES_AND_UTS } from "@/lib/india";
 import type { Driver, Location, Vehicle } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { useAuth } from "./AuthProvider";
@@ -65,6 +66,11 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
     status: vehicle?.status ?? "AVAILABLE",
     odometerKm: vehicle?.odometerKm?.toString() ?? "0",
     depotLocationId: vehicle?.depotLocationId?.toString() ?? "",
+    registrationState: vehicle?.registrationState ?? "",
+    ownershipType: vehicle?.ownershipType ?? "OWNED",
+    ownerName: vehicle?.ownerName ?? "",
+    ownerPhone: vehicle?.ownerPhone ?? "",
+    fastagId: vehicle?.fastagId ?? "",
   });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
   const { can } = useAuth();
@@ -88,6 +94,11 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
           avgSpeedKmph: Number(f.avgSpeedKmph),
           odometerKm: Number(f.odometerKm || 0),
           depotLocationId: f.depotLocationId ? Number(f.depotLocationId) : null,
+          registrationState: f.registrationState || null,
+          ownershipType: f.ownershipType,
+          ownerName: f.ownershipType === "OWNED" ? null : f.ownerName || null,
+          ownerPhone: f.ownershipType === "OWNED" ? null : f.ownerPhone || null,
+          fastagId: f.fastagId || null,
         };
         if (vehicle && f.status !== vehicle.status) body.status = f.status;
         await api(vehicle ? `/vehicles/${vehicle.id}` : "/vehicles", { method: vehicle ? "PATCH" : "POST", body });
@@ -105,9 +116,29 @@ export function VehicleForm({ vehicle, onSaved }: { vehicle?: Vehicle; onSaved: 
             ))}
           </Select>
         </Field>
-        <Field label="Make"><Input value={f.make} onChange={set("make")} /></Field>
+        <Field label="Registration state" hint="As printed on the RC">
+          <Select value={f.registrationState} onChange={set("registrationState")}>
+            <option value="">— select —</option>
+            {INDIAN_STATES_AND_UTS.map((st) => (<option key={st}>{st}</option>))}
+          </Select>
+        </Field>
+        <Field label="Ownership">
+          <Select value={f.ownershipType} onChange={set("ownershipType")}>
+            <option value="OWNED">Owned by the company</option>
+            <option value="LEASED">Leased</option>
+            <option value="ATTACHED">Attached (market vehicle)</option>
+          </Select>
+        </Field>
+        {f.ownershipType !== "OWNED" && (
+          <>
+            <Field label="Registered owner"><Input value={f.ownerName} onChange={set("ownerName")} autoComplete="off" /></Field>
+            <Field label="Owner phone"><Input type="tel" inputMode="tel" value={f.ownerPhone} onChange={set("ownerPhone")} placeholder="+91 98xxxxxxxx" /></Field>
+          </>
+        )}
+        <Field label="Manufacturer (make)"><Input value={f.make} onChange={set("make")} placeholder="Tata, Ashok Leyland…" /></Field>
         <Field label="Model"><Input value={f.model} onChange={set("model")} /></Field>
-        <Field label="Year"><Input type="number" min={1980} max={2100} value={f.year} onChange={set("year")} /></Field>
+        <Field label="Manufacturing year"><Input type="number" inputMode="numeric" min={1980} max={2100} value={f.year} onChange={set("year")} /></Field>
+        <Field label="FASTag ID" hint="Optional; upload the tag under documents"><Input value={f.fastagId} onChange={set("fastagId")} /></Field>
         <Field label="Capacity (kg)"><Input type="number" min={1} required value={f.capacityKg} onChange={set("capacityKg")} /></Field>
         <Field label="Fuel / energy">
           <Select value={f.fuelType} onChange={set("fuelType")}>
@@ -174,6 +205,8 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
     maxShiftHours: driver?.maxShiftHours?.toString() ?? "10",
     status: driver?.status ?? "AVAILABLE",
     userId: driver?.userId?.toString() ?? "",
+    licenseClass: driver?.licenseClass ?? "",
+    licenseIssuedOn: driver?.licenseIssuedOn?.slice(0, 10) ?? "",
   });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
   return (
@@ -187,8 +220,11 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
           licenseExpiry: new Date(`${f.licenseExpiry}T00:00:00`).toISOString(),
           maxShiftHours: Number(f.maxShiftHours),
           userId: f.userId ? Number(f.userId) : null,
+          licenseClass: f.licenseClass || null,
+          licenseIssuedOn: f.licenseIssuedOn ? new Date(`${f.licenseIssuedOn}T00:00:00`).toISOString() : null,
         };
         if (driver && f.status !== driver.status) body.status = f.status;
+        if (f.licenseIssuedOn && f.licenseExpiry && f.licenseExpiry < f.licenseIssuedOn) throw new Error("Licence expiry cannot be before its issue date.");
         if (f.licenseNumber.trim().length < 5) throw new Error("Licence number must be at least 5 characters.");
         const shift = Number(f.maxShiftHours);
         if (!(shift >= 1 && shift <= 16)) throw new Error("Max shift must be between 1 and 16 hours.");
@@ -198,9 +234,11 @@ export function DriverForm({ driver, onSaved }: { driver?: Driver; onSaved: () =
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Full name"><Input required value={f.name} onChange={set("name")} /></Field>
-        <Field label="Phone"><Input required value={f.phone} onChange={set("phone")} placeholder="+91 98xxxxxxxx" /></Field>
+        <Field label="Mobile number"><Input required type="tel" inputMode="tel" autoComplete="off" value={f.phone} onChange={set("phone")} placeholder="+91 98xxxxxxxx" /></Field>
         <Field label="Licence number"><Input required value={f.licenseNumber} onChange={set("licenseNumber")} /></Field>
-        <Field label="Licence expiry"><Input type="date" required value={f.licenseExpiry} onChange={set("licenseExpiry")} /></Field>
+        <Field label="Licence class" hint="e.g. LMV, HGMV, TRANS"><Input value={f.licenseClass} onChange={set("licenseClass")} /></Field>
+        <Field label="Licence issued on"><Input type="date" value={f.licenseIssuedOn} onChange={set("licenseIssuedOn")} /></Field>
+        <Field label="Licence expiry" hint="Dispatch is blocked after this date"><Input type="date" required value={f.licenseExpiry} onChange={set("licenseExpiry")} /></Field>
         <Field label="Max shift (hours)"><Input type="number" min={1} max={16} step="0.5" value={f.maxShiftHours} onChange={set("maxShiftHours")} /></Field>
         {users.data ? (
           <Field label="App login" hint={linkable.length ? "A DRIVER user who can then update their own trips" : "No unlinked DRIVER users. Create one under Users first."}>

@@ -6,6 +6,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { FormShell } from "@/components/forms";
+import { DocumentUploadForm } from "@/components/DocumentUploadDialog";
+import { ComplianceOverviewCard } from "@/components/ComplianceOverviewCard";
 import {
   Alert,
   Badge,
@@ -29,13 +31,11 @@ import {
 } from "@/components/ds";
 import { api } from "@/lib/api";
 import { daysUntil, docTypeLabel, fmtDate, fmtRelDays, humanize } from "@/lib/format";
-import type { ComplianceDoc, Driver, Vehicle } from "@/lib/types";
+import type { ComplianceDoc } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
-const TYPES = ["RC", "INSURANCE", "PUC", "FITNESS", "PERMIT", "DRIVING_LICENSE", "OTHER"] as const;
+const TYPES = ["RC", "INSURANCE", "PUC", "FITNESS", "PERMIT", "STATE_PERMIT", "FASTAG", "DRIVING_LICENSE", "DRIVER_PHOTO", "KYC_ID", "OTHER"] as const;
 const STATES = ["EXPIRED", "EXPIRING_SOON", "VALID", "NO_EXPIRY"] as const;
-const ACCEPT = "application/pdf,image/png,image/jpeg,image/webp";
-const VEHICLE_TYPES = new Set(["RC", "INSURANCE", "PUC", "FITNESS", "PERMIT"]);
 
 /** Dates are entered as calendar days; stored as start/end of that local day like before. */
 const isoStart = (d: string) => (d ? new Date(`${d}T00:00:00`).toISOString() : null);
@@ -43,93 +43,6 @@ const isoEnd = (d: string) => (d ? new Date(`${d}T23:59:59`).toISOString() : nul
 
 function datesError(issuedOn: string, expiresOn: string) {
   return issuedOn && expiresOn && expiresOn < issuedOn ? "Expiry date can’t be before the issue date." : null;
-}
-
-function UploadForm({ onSaved, presetVehicle, presetDriver }: { onSaved: () => void; presetVehicle?: string; presetDriver?: string }) {
-  const vehicles = useApi<Vehicle[]>("/vehicles");
-  const drivers = useApi<Driver[]>("/drivers");
-  const [owner, setOwner] = useState<"vehicle" | "driver">(presetDriver ? "driver" : "vehicle");
-  const [f, setF] = useState({ type: presetDriver ? "DRIVING_LICENSE" : "INSURANCE", documentNumber: "", issuedOn: "", expiresOn: "", notes: "", vehicleId: presetVehicle ?? "", driverId: presetDriver ?? "" });
-  const [file, setFile] = useState<File | null>(null);
-  const [expiryError, setExpiryError] = useState<string | null>(null);
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
-  const mismatch = owner === "driver" && VEHICLE_TYPES.has(f.type);
-  return (
-    <FormShell
-      submitLabel="Save document"
-      onSubmit={async () => {
-        const err = datesError(f.issuedOn, f.expiresOn);
-        setExpiryError(err);
-        if (err) throw new Error(err);
-        if (file && !ACCEPT.split(",").includes(file.type)) throw new Error("The scan must be a PDF, PNG, JPEG or WEBP file.");
-        const fd = new FormData();
-        fd.set("type", f.type);
-        fd.set("documentNumber", f.documentNumber.trim());
-        if (f.issuedOn) fd.set("issuedOn", isoStart(f.issuedOn)!);
-        if (f.expiresOn) fd.set("expiresOn", isoEnd(f.expiresOn)!);
-        if (f.notes) fd.set("notes", f.notes);
-        if (owner === "vehicle") fd.set("vehicleId", f.vehicleId);
-        else fd.set("driverId", f.driverId);
-        if (file) fd.set("file", file);
-        await api("/documents", { body: fd });
-        onSaved();
-      }}
-    >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Belongs to">
-          <Select value={owner} onChange={(e) => setOwner(e.target.value as "vehicle" | "driver")}>
-            <option value="vehicle">Vehicle</option>
-            <option value="driver">Driver</option>
-          </Select>
-        </Field>
-        {owner === "vehicle" ? (
-          <Field label="Vehicle" required>
-            <Select required value={f.vehicleId} onChange={set("vehicleId")}>
-              <option value="">Select…</option>
-              {vehicles.data?.map((v) => (
-                <option key={v.id} value={v.id}>{v.registrationNumber}</option>
-              ))}
-            </Select>
-          </Field>
-        ) : (
-          <Field label="Driver" required>
-            <Select required value={f.driverId} onChange={set("driverId")}>
-              <option value="">Select…</option>
-              {drivers.data?.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </Select>
-          </Field>
-        )}
-        <Field label="Document type" hint={mismatch ? "This is usually a vehicle document." : undefined}>
-          <Select value={f.type} onChange={set("type")}>
-            {TYPES.map((t) => (
-              <option key={t} value={t}>{docTypeLabel(t)}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Document number" required>
-          <Input required maxLength={60} value={f.documentNumber} onChange={set("documentNumber")} />
-        </Field>
-        <Field label="Issued on">
-          <Input type="date" value={f.issuedOn} onChange={set("issuedOn")} />
-        </Field>
-        <Field label="Expires on" hint="Expired RC, insurance, PUC, fitness and permit documents block dispatch" error={expiryError}>
-          <Input type="date" value={f.expiresOn} onChange={set("expiresOn")} />
-        </Field>
-        <div className="sm:col-span-2">
-          <Field label="Scan (optional)" hint={file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB` : "PDF, PNG, JPEG or WEBP, up to the server limit (5 MB by default). Stored privately; downloads require sign-in."}>
-            <Input type="file" accept={ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          </Field>
-        </div>
-        <div className="sm:col-span-2">
-          <Field label="Notes">
-            <Textarea maxLength={1000} value={f.notes} onChange={set("notes")} />
-          </Field>
-        </div>
-      </div>
-    </FormShell>
-  );
 }
 
 function EditForm({ doc, onSaved }: { doc: ComplianceDoc; onSaved: () => void }) {
@@ -290,6 +203,7 @@ function DocumentsInner() {
       <Alert kind="info">
         States are calculated from the dates entered in RaahSetu. Documents are not checked against VAHAN, Sarathi, insurers or any government system.
       </Alert>
+      {!ownerLabel && <ComplianceOverviewCard />}
 
       {ownerLabel && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -360,9 +274,10 @@ function DocumentsInner() {
 
       <Modal open={creating} title="Add compliance document" onClose={() => setParams({ new: null })} wide>
         {creating && (
-          <UploadForm
-            presetVehicle={vehicleId}
-            presetDriver={driverId}
+          <DocumentUploadForm
+            chooseOwner
+            owner={{ vehicleId: vehicleId ? Number(vehicleId) : undefined, driverId: driverId ? Number(driverId) : undefined }}
+            onCancel={() => setParams({ new: null })}
             onSaved={() => {
               setParams({ new: null });
               reload();

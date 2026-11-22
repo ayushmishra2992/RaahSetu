@@ -1,8 +1,10 @@
 import { prisma } from "../../config/prisma";
 import type { TripStatus } from "../../generated/prisma/enums";
-import { badRequest, conflict, forbidden, notFound, unprocessable } from "../../lib/errors";
+import type { Prisma } from "../../generated/prisma/client";
+import { AppError, badRequest, conflict, forbidden, notFound, unprocessable } from "../../lib/errors";
 import type { AuthContext } from "../../middleware/auth";
-import { COMPLIANCE_BLOCKING_TYPES, buildInstance, type OptimizeRequest } from "../optiroute/optiroute.service";
+import { dispatchCheck, redactDispatchCheck, visibilityFor } from "../compliance/compliance.service";
+import { buildInstance, type OptimizeRequest } from "../optiroute/optiroute.service";
 import { solve } from "../../optimizer/solver";
 import { createTripsFromRoutes, lockFleet } from "./tripFactory";
 
@@ -45,14 +47,17 @@ export async function transitionTrip(auth: AuthContext, tripId: number, to: Trip
     if (to === "DISPATCHED") {
       // Vehicle and driver rows are locked, so these reads are current until we commit.
       const [vehicle, driver] = await Promise.all([
-        tx.vehicle.findUniqueOrThrow({ where: { id: trip.vehicleId }, include: { documents: true } }),
+        tx.vehicle.findUniqueOrThrow({ where: { id: trip.vehicleId } }),
         tx.driver.findUniqueOrThrow({ where: { id: trip.driverId } }),
       ]);
       if (vehicle.status !== "AVAILABLE") throw conflict(`Vehicle ${vehicle.registrationNumber} is ${vehicle.status}`);
       if (driver.status !== "AVAILABLE") throw conflict(`Driver ${driver.name} is ${driver.status}`);
-      const expired = vehicle.documents.find((d) => (COMPLIANCE_BLOCKING_TYPES as readonly string[]).includes(d.type) && d.expiresOn && d.expiresOn < now);
-      if (expired) throw conflict(`Vehicle ${expired.type} expired on ${expired.expiresOn!.toISOString().slice(0, 10)}`);
-      if (driver.licenseExpiry < now) throw conflict(`Driver licence expired on ${driver.licenseExpiry.toISOString().slice(0, 10)}`);
+      // Central compliance engine: vehicle documents, driver licence and shipment documents
+      // (E-Way Bills) against the company's policy. Never bypassed.
+      const check = redactDispatchCheck(await dispatchCheck(tx, auth.companyId, { vehicleId: vehicle.id, driverId: driver.id, orderIds }, now), visibilityFor(auth.role));
+      if (!check.eligible) {
+        throw new AppError(409, `Cannot dispatch: ${check.blockers.join("; ")}`, "COMPLIANCE_BLOCKED", { blockers: check.blockers, warnings: check.warnings });
+      }
       await tx.vehicle.update({ where: { id: vehicle.id }, data: { status: "ON_TRIP" } });
       await tx.driver.update({ where: { id: driver.id }, data: { status: "ON_TRIP" } });
     }
@@ -90,9 +95,18 @@ export type StopAction = "ARRIVE" | "COMPLETE" | "SKIP";
 export async function updateStop(auth: AuthContext, tripId: number, stopId: number, action: StopAction) {
   // Outside the transaction: 404 for other tenants and for drivers' foreign trips.
   const trip = await loadTripForAction(auth, tripId);
-  const now = new Date();
+  await prisma.$transaction((tx) => applyStopAction(tx, auth, trip.id, stopId, action));
+}
 
-  await prisma.$transaction(async (tx) => {
+/**
+ * Stop transition inside the CALLER's transaction (so proof of delivery can record
+ * the stop outcome and the POD atomically). The caller must already have checked
+ * that `auth` may act on this trip (loadTripForAction).
+ */
+export async function applyStopAction(tx: Prisma.TransactionClient, auth: AuthContext, tripId: number, stopId: number, action: StopAction) {
+  const trip = { id: tripId };
+  const now = new Date();
+  {
     // Lock the trip row so stop updates and trip transitions on this trip run one
     // at a time, then validate against data read under that lock.
     const [locked] = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM "Trip" WHERE id = ${trip.id} AND "companyId" = ${auth.companyId} FOR UPDATE`;
@@ -127,7 +141,8 @@ export async function updateStop(auth: AuthContext, tripId: number, stopId: numb
     await tx.auditEvent.create({
       data: { companyId: auth.companyId, userId: auth.userId, action: `trip.stop_${action.toLowerCase()}`, entityType: "Trip", entityId: trip.id, metadata: { stopId, orderId: stop.orderId } },
     });
-  });
+    return stop;
+  }
 }
 
 /** Manual trip: dispatcher picks vehicle, driver and orders; stops are sequenced and validated by OptiRoute. */

@@ -10,6 +10,8 @@ import { authOf } from "../../lib/http";
 import { verificationToken } from "../../lib/tokens";
 import { parseBody, parseId, parseQuery, zOptionalDate } from "../../lib/validate";
 import { requirePermission } from "../../middleware/auth";
+import { billingPdf } from "../shipments/pdfs";
+import { sendPdf } from "../shipments/shipments.common";
 import { computeTotals } from "./billing.service";
 
 const router = Router();
@@ -17,6 +19,13 @@ const router = Router();
 const Kind = z.enum(["INVOICE", "DELIVERY_CHALLAN"]);
 const Item = z.object({
   description: z.string().trim().min(1).max(200),
+  hsnCode: z
+    .string()
+    .trim()
+    .regex(/^\d{4}(\d{2}){0,2}$/, "HSN/SAC code must be 4, 6 or 8 digits")
+    .optional()
+    .nullable()
+    .or(z.literal("").transform(() => null)),
   quantity: z.coerce.number().positive().max(1e6),
   unit: z.string().trim().max(20).optional(),
   rate: z.coerce.number().nonnegative().max(1e9),
@@ -37,6 +46,8 @@ const BillingBody = z.object({
   taxRatePercent: z.coerce.number().min(0).max(28).default(18),
   dueDate: zOptionalDate,
   notes: z.string().trim().max(1000).optional().nullable(),
+  reasonForTransport: z.string().trim().max(200).optional().nullable(),
+  referenceDocuments: z.string().trim().max(300).optional().nullable(),
   items: z.array(Item).min(1).max(50),
 });
 
@@ -95,6 +106,8 @@ router.post("/", requirePermission("billing:write"), async (req, res) => {
           total: totals.total,
           dueDate: body.dueDate ?? null,
           notes: body.notes ?? null,
+          reasonForTransport: body.reasonForTransport ?? null,
+          referenceDocuments: body.referenceDocuments ?? null,
           verificationToken: verificationToken(),
           items: { create: totals.lines },
         },
@@ -135,6 +148,8 @@ router.put("/:id", requirePermission("billing:write"), async (req, res) => {
         total: totals.total,
         dueDate: body.dueDate ?? null,
         notes: body.notes ?? null,
+        reasonForTransport: body.reasonForTransport ?? null,
+        referenceDocuments: body.referenceDocuments ?? null,
         items: { create: totals.lines },
       },
       include,
@@ -166,6 +181,41 @@ router.post("/:id/:action", requirePermission("billing:write"), async (req, res)
   });
   await audit(auth, `billing.${flow.to.toLowerCase()}`, "BillingDocument", id, { number: doc.number });
   res.json(doc);
+});
+
+export async function billingPdfFor(companyId: number, id: number) {
+  const doc = await prisma.billingDocument.findFirst({
+    where: { id, companyId },
+    include: {
+      items: { orderBy: { id: "asc" } },
+      company: true,
+      trip: {
+        include: {
+          vehicle: { select: { registrationNumber: true, type: true } },
+          driver: { select: { name: true, phone: true, licenseNumber: true } },
+          stops: { orderBy: { sequence: "asc" }, include: { location: { select: { name: true, city: true, state: true } } } },
+        },
+      },
+    },
+  });
+  if (!doc) throw notFound("Billing document");
+  const c = doc.company;
+  const stops = doc.trip?.stops.filter((s) => s.type === "PICKUP" || s.type === "DROP") ?? [];
+  const place = (l?: { name: string; city: string | null; state: string | null }) => (l ? [l.name, l.city, l.state].filter(Boolean).join(", ") : null);
+  const pdf = await billingPdf({
+    ...doc,
+    issuer: { name: c.name, address: c.address, city: c.city, state: c.state, gstNumber: c.gstNumber, phone: c.phone },
+    trip: doc.trip ? { ...doc.trip, from: place(stops[0]?.location), to: place(stops.at(-1)?.location) } : null,
+  });
+  return { pdf, fileName: `${doc.number}.pdf`, number: doc.number };
+}
+
+/** Server-rendered PDF of an invoice or delivery challan (drafts are watermarked "DRAFT"). */
+router.get("/:id/pdf", requirePermission("billing:read"), async (req, res) => {
+  const auth = authOf(req);
+  const { pdf, fileName } = await billingPdfFor(auth.companyId, parseId(req.params.id));
+  await audit(auth, "billing.pdf_downloaded", "BillingDocument", parseId(req.params.id));
+  sendPdf(res, pdf, fileName, req.query.inline === "1");
 });
 
 router.get("/:id/qr", requirePermission("billing:read"), async (req, res) => {

@@ -6,6 +6,7 @@
 export type BillingKind = "INVOICE" | "DELIVERY_CHALLAN";
 
 export interface DraftItem {
+  hsnCode?: string;
   description: string;
   quantity: string;
   unit: string;
@@ -52,6 +53,7 @@ export function validateBilling(f: { customerName: string; customerGstin: string
     else if (!(q > 0) || q > 1e6) rows[i] = "Quantity must be more than 0.";
     else if (!(r >= 0) || r > 1e9) rows[i] = "Rate can't be negative.";
     else if (it.unit.length > 20) rows[i] = "Unit is limited to 20 characters.";
+    else if (it.hsnCode?.trim() && !/^\d{4}(\d{2}){0,2}$/.test(it.hsnCode.trim())) rows[i] = "HSN/SAC code must be 4, 6 or 8 digits.";
   });
   if (Object.keys(rows).length) e.itemRows = rows;
   return e;

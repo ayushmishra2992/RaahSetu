@@ -53,9 +53,13 @@ erDiagram
 |---|---|---|
 | `Company` | Tenant | `name`, `gstNumber` (unique, optional), address fields, `settings` (JSON: fuel prices, emission factors, cost weights, alert days — validated by the API) |
 | `User` | Login account | `email` (unique), `passwordHash` (bcrypt), `role` (UserRole), `isActive`, `lastLoginAt` |
-| `Vehicle` | Fleet vehicle | `registrationNumber` (unique per company), `type`, `capacityKg`, `fuelType`, `mileageKmPerUnit`, `avgSpeedKmph`, `status`, `odometerKm`, optional depot `Location` |
-| `Driver` | Driver profile | `licenseNumber` (unique per company), `licenseExpiry`, `status`, `maxShiftHours`, optional link to a DRIVER `User` (unique) |
-| `ComplianceDocument` | RC, insurance, PUC, fitness, permit, licence | `type`, `documentNumber`, `issuedOn`, `expiresOn`, belongs to a vehicle **or** a driver; optional file metadata with a unique random `storageKey` (file stored outside the database) |
+| `Vehicle` | Fleet vehicle | `registrationNumber` (unique per company), `type`, `capacityKg`, `fuelType`, `mileageKmPerUnit`, `avgSpeedKmph`, `status`, `odometerKm`, optional depot `Location`; `registrationState`, `ownershipType` (OWNED/LEASED/ATTACHED), `ownerName`, `ownerPhone`, `fastagId` |
+| `Driver` | Driver profile | `licenseNumber` (unique per company), `licenseExpiry`, `licenseClass`, `licenseIssuedOn`, `status`, `maxShiftHours`, optional link to a DRIVER `User` (unique); KYC (admin/manager only): `address`, emergency contact, `kycIdType`, `kycIdLast4` (never a full ID number), `kycConsentAt`/`kycConsentById`, `kycVerification` |
+| `ComplianceDocument` | RC, insurance, PUC, fitness, permits, FASTag, licence, driver photo, KYC proof | `type`, `documentNumber`, `issuedOn`, `expiresOn`, belongs to a vehicle **or** a driver; `verificationStatus` (PENDING/VERIFIED/REJECTED), `verifiedAt`, `verifiedById`, `rejectionReason`; files in `Attachment` (legacy single-file columns kept for older uploads) |
+| `Attachment` | A private stored file | `role` (FRONT/BACK/PAGE/PHOTO/SIGNATURE), `fileName`, `fileMimeType`, `fileSizeBytes`, unique random `storageKey`, `sha256`, `uploadedById`; belongs to exactly one of a compliance document, an E-Way Bill or a POD |
+| `EwayBill` | E-Way Bill **recorded** by the transporter | `ewbNumber` (unique per company), `documentDate`, `validUntil`, supplier/recipient and GSTINs, places, goods, `hsnCode`, quantity, `taxableValue`, references, `vehicleNumber`, `status` (ACTIVE/CANCELLED); belongs to an `Order`, optional `Trip` |
+| `LorryReceipt` | LR / bilty | `lrNumber` (unique per company), booking date, consignor/consignee (+ GSTIN), from/to, goods, packages, weights, `freightAmount`, `paymentTerms`, `status`; belongs to an `Order`, optional `Trip` |
+| `ProofOfDelivery` | Delivery record for one DROP stop | unique `tripStopId`, `status` (DELIVERED/PARTIALLY_DELIVERED/FAILED/RETURNED/DISPUTED), receiver, `deliveredAt`, quantity, shortage/damage/remarks, `verificationToken`; signature and photos in `Attachment` |
 | `Location` | Depot, warehouse, customer | `name`, `address`, `type`, `lat`, `lng`, optional `roadNode`; location-search details `city`, `state`, `postalCode`, `country`, `placeProvider`, `providerPlaceId`, `coordsSource` (MANUAL/SEARCH/PIN_ADJUSTED, default MANUAL) |
 | `RoadNode`, `RoadEdge` | Road graph for routing | edges have `distanceKm`, `speedKmph`, `bidirectional`, `isClosed`, optional `name` |
 | `Order` | Transport request | `orderNumber` (unique per company), pickup and drop `Location` (RESTRICT on delete), `weightKg`, `priority`, `readyAt`, `windowStart`/`windowEnd`, `serviceMinutes`, `status`, `declaredValue` |
@@ -102,6 +106,8 @@ Committed SQL migrations in `backend/prisma/migrations/`, applied in order:
 | `20261005105336_init` | Initial schema |
 | `20261019120000_raahsetu_v2` | Fleet operations, OptiRoute runs, scenarios, billing, GreenFleet, audit |
 | `20261113120000_location_place_details` | Additive: `CoordSource` enum and optional location-search columns on `Location` (`city`, `state`, `postalCode`, `country`, `placeProvider`, `providerPlaceId`, `coordsSource` with default `MANUAL`) |
+| `20261118120000_transport_documents_compliance` | Additive: new `DocumentType` values, verification/KYC/ownership columns, HSN and challan fields, and the `Attachment`, `EwayBill`, `LorryReceipt` and `ProofOfDelivery` tables (details in [DOCUMENTS_AND_COMPLIANCE.md](DOCUMENTS_AND_COMPLIANCE.md#10-database-changes)) |
+| `20261119120000_transport_documents_lifecycle` | Additive, nullable columns only: E-Way Bill valid-from and cancellation details; LR advance, finalization, terms snapshot and cancellation details |
 
 ### Commands
 

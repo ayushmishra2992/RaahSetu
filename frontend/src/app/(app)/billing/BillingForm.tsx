@@ -27,9 +27,11 @@ export function BillingForm({ doc, presetTripId, onSaved }: { doc?: BillingDoc; 
     taxRatePercent: doc?.taxRatePercent?.toString() ?? "18",
     dueDate: doc?.dueDate ? localDate(doc.dueDate) : "",
     notes: doc?.notes ?? "",
+    reasonForTransport: doc?.reasonForTransport ?? "",
+    referenceDocuments: doc?.referenceDocuments ?? "",
   });
   const [items, setItems] = useState<DraftItem[]>(
-    doc?.items?.map((i) => ({ description: i.description, quantity: String(i.quantity), unit: i.unit, rate: String(i.rate) })) ?? [{ description: "Freight charges", quantity: "1", unit: "trip", rate: "" }],
+    doc?.items?.map((i) => ({ description: i.description, hsnCode: i.hsnCode ?? "", quantity: String(i.quantity), unit: i.unit, rate: String(i.rate) })) ?? [{ description: "Freight charges", quantity: "1", unit: "trip", rate: "" }],
   );
   const [errors, setErrors] = useState<BillingErrors>({});
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -59,7 +61,9 @@ export function BillingForm({ doc, presetTripId, onSaved }: { doc?: BillingDoc; 
           taxRatePercent: kind === "INVOICE" ? Number(f.taxRatePercent || 0) : 0,
           dueDate: f.dueDate ? new Date(`${f.dueDate}T23:59:59`).toISOString() : null,
           notes: f.notes.trim() || null,
-          items: items.map((i) => ({ description: i.description.trim(), quantity: Number(i.quantity), unit: i.unit.trim() || "nos", rate: Number(i.rate || 0) })),
+          reasonForTransport: kind === "DELIVERY_CHALLAN" ? f.reasonForTransport.trim() || null : null,
+          referenceDocuments: f.referenceDocuments.trim() || null,
+          items: items.map((i) => ({ description: i.description.trim(), hsnCode: i.hsnCode?.trim() || null, quantity: Number(i.quantity), unit: i.unit.trim() || "nos", rate: Number(i.rate || 0) })),
         };
         const saved = await api<{ id: number }>(doc ? `/billing/${doc.id}` : "/billing", { method: doc ? "PUT" : "POST", body });
         onSaved(saved.id);
@@ -107,8 +111,9 @@ export function BillingForm({ doc, presetTripId, onSaved }: { doc?: BillingDoc; 
       <fieldset className="min-w-0">
         <legend className="mb-2 text-sm font-medium text-ink">Line items</legend>
         {errors.items && <p className="mb-2 text-xs font-medium text-danger-600">{errors.items}</p>}
-        <div className="hidden grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_7.5rem_6.5rem_2.25rem] gap-2 px-0.5 pb-1 text-xs text-muted sm:grid">
+        <div className="hidden grid-cols-[minmax(0,1fr)_5rem_5rem_5rem_7rem_6.5rem_2.25rem] gap-2 px-0.5 pb-1 text-xs text-muted sm:grid">
           <span>Description</span>
+          <span>HSN/SAC</span>
           <span>Quantity</span>
           <span>Unit</span>
           <span>Rate (₹)</span>
@@ -120,8 +125,9 @@ export function BillingForm({ doc, presetTripId, onSaved }: { doc?: BillingDoc; 
             const rowError = errors.itemRows?.[idx];
             return (
               <li key={idx} className={cx("rounded-md sm:rounded-none", "max-sm:border max-sm:border-line max-sm:p-3")}>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_7.5rem_6.5rem_2.25rem] sm:items-center">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_5rem_5rem_7rem_6.5rem_2.25rem] sm:items-center">
                   <Input aria-label={`Line ${idx + 1} description`} aria-invalid={!!rowError || undefined} className="col-span-2 sm:col-span-1" placeholder="Description" value={it.description} maxLength={200} onChange={(e) => setItem(idx, { description: e.target.value })} />
+                  <Input aria-label={`Line ${idx + 1} HSN/SAC code`} inputMode="numeric" placeholder="HSN" value={it.hsnCode ?? ""} maxLength={8} onChange={(e) => setItem(idx, { hsnCode: e.target.value })} />
                   <Input aria-label={`Line ${idx + 1} quantity`} type="number" step="any" min={0.01} placeholder="Qty" value={it.quantity} onChange={(e) => setItem(idx, { quantity: e.target.value })} />
                   <Input aria-label={`Line ${idx + 1} unit`} placeholder="Unit" value={it.unit} maxLength={20} onChange={(e) => setItem(idx, { unit: e.target.value })} />
                   <Input aria-label={`Line ${idx + 1} rate`} type="number" step="any" min={0} placeholder="Rate" value={it.rate} onChange={(e) => setItem(idx, { rate: e.target.value })} />
@@ -152,6 +158,16 @@ export function BillingForm({ doc, presetTripId, onSaved }: { doc?: BillingDoc; 
           <p className="text-xs text-muted">Preview. The server recalculates and stores the final amounts.</p>
         </dl>
       </fieldset>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {kind === "DELIVERY_CHALLAN" && (
+          <Field label="Reason for transport" hint="e.g. Supply, job work, supply on approval">
+            <Input value={f.reasonForTransport} onChange={set("reasonForTransport")} maxLength={200} />
+          </Field>
+        )}
+        <Field label="Reference documents" hint="PO, E-Way Bill or LR numbers">
+          <Input value={f.referenceDocuments} onChange={set("referenceDocuments")} maxLength={300} />
+        </Field>
+      </div>
       <Field label="Notes">
         <Textarea value={f.notes} onChange={set("notes")} maxLength={1000} />
       </Field>

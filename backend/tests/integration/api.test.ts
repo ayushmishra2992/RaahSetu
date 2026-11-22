@@ -345,14 +345,21 @@ describe.skipIf(!enabled)("RaahSetu API (integration, real PostgreSQL)", () => {
 
   describe("eligibility, scenarios and analytics", () => {
     it("excludes vehicles with expired compliance documents", async () => {
-      const doc = await request(app).post("/api/documents").set(auth(A)).send({ type: "PUC", documentNumber: "PUC-OLD", vehicleId: ids.v2, expiresOn: new Date(Date.now() - 86400000).toISOString() });
+      // v2 is electric: PUC does not apply to it (default rule), so an expired PUC only warns…
+      const puc = await request(app).post("/api/documents").set(auth(A)).send({ type: "PUC", documentNumber: "PUC-OLD", vehicleId: ids.v2, expiresOn: new Date(Date.now() - 86400000).toISOString() });
+      expect(puc.status).toBe(201);
+      const evBefore = await request(app).get(`/api/vehicles/${ids.v2}`).set(auth(A));
+      expect(evBefore.body.compliance.blockers).toEqual([]);
+      expect(evBefore.body.compliance.warnings.join(" ")).toMatch(/PUC expired/);
+      // …whereas an expired insurance policy (mandatory for every vehicle) excludes it.
+      const doc = await request(app).post("/api/documents").set(auth(A)).send({ type: "INSURANCE", documentNumber: "INS-OLD", vehicleId: ids.v2, expiresOn: new Date(Date.now() - 86400000).toISOString() });
       expect(doc.status).toBe(201);
       const ord = await request(app).post("/api/orders").set(auth(A)).send({ customerName: "Cust C", pickupLocationId: ids.wh, dropLocationId: ids.c2, weightKg: 300 });
       expect(ord.status).toBe(201);
       const r = await request(app).post("/api/optiroute/runs").set(auth(A)).send({ algorithm: "GREEDY_INSERTION" });
       expect(r.status).toBe(201);
       const ex = r.body.result.exclusions.find((e: { id: number; kind: string }) => e.kind === "VEHICLE" && e.id === ids.v2);
-      expect(ex.reason).toMatch(/PUC expired/);
+      expect(ex.reason).toMatch(/INSURANCE expired/);
       ids.run2 = r.body.id;
     });
 
