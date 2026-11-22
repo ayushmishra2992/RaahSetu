@@ -2,7 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../../config/prisma";
 import { audit } from "../../lib/audit";
-import { notFound } from "../../lib/errors";
+import { conflict, notFound } from "../../lib/errors";
 import { authOf } from "../../lib/http";
 import { contentDisposition, readIfExists, verifyFileToken } from "../../lib/storage";
 import { parseId } from "../../lib/validate";
@@ -35,9 +35,21 @@ attachmentRoutes.get("/:id", async (req, res) => {
 attachmentRoutes.delete("/:id", async (req, res) => {
   const auth = authOf(req);
   const a = await loadAttachmentFor(auth, parseId(req.params.id), "write");
-  await prisma.attachment.delete({ where: { id: a.id } });
+  await prisma.$transaction(async (tx) => {
+    // The receiver's signature is the POD's core evidence: captured once, never replaced or removed (any role).
+    if (a.role === "SIGNATURE") throw conflict("A delivery signature is never removed");
+    if (a.ewayBillId) {
+      // A cancelled E-Way Bill record is frozen (edits and uploads are already refused). The row lock
+      // serialises this check with a concurrent cancellation, which takes the same lock.
+      const [row] = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM "EwayBill" WHERE id = ${a.ewayBillId} AND "companyId" = ${auth.companyId} FOR UPDATE`;
+      if (!row || row.status !== "ACTIVE") throw conflict("Files of a cancelled E-Way Bill record cannot be deleted");
+    }
+    const { count } = await tx.attachment.deleteMany({ where: { id: a.id, companyId: auth.companyId } });
+    if (!count) throw notFound("File");
+    await audit(auth, "file.deleted", "Attachment", a.id, { role: a.role }, tx);
+  });
+  // The object is removed only after the row deletion has committed.
   await deleteStoredObjects(auth.companyId, [a.storageKey]);
-  await audit(auth, "file.deleted", "Attachment", a.id, { role: a.role });
   res.status(204).end();
 });
 

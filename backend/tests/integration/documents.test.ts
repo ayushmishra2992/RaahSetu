@@ -762,5 +762,88 @@ describe.skipIf(!enabled)("transport documents, compliance and POD (integration)
       const final = (await request(app).get(`/api/pods/${id.pod}`).set(auth(A))).body;
       expect(payloads.some((pl) => pl.status === final.status && pl.remarks === final.remarks)).toBe(true); // one submission fully applied, not a mix
     });
+
+    it("deletes files of an active E-Way Bill, but refuses (409) once it is cancelled; other companies get 404", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic delete guard" };
+      const created = request(app).post("/api/eway-bills").set(auth(manager));
+      for (const [k, v] of Object.entries({ ...base, ewbNumber: "391000000022" })) created.field(k, String(v));
+      const c = await created.attach("file", PDF, { filename: "a.pdf", contentType: "application/pdf" }).attach("file", PDF, { filename: "b.pdf", contentType: "application/pdf" });
+      expect(c.status, JSON.stringify(c.body)).toBe(201);
+      const [first, second] = c.body.attachments as Array<{ id: number }>;
+      // Cross-company: never visible, never deletable.
+      expect((await request(app).delete(`/api/attachments/${first.id}`).set(auth(B))).status).toBe(404);
+      expect((await request(app).delete(`/api/attachments/${first.id}`).set(auth(employee))).status).toBe(404); // no shipments:write
+      // Active record: deletion still works.
+      expect((await request(app).delete(`/api/attachments/${first.id}`).set(auth(manager))).status).toBe(204);
+      expect((await request(app).get(`/api/attachments/${first.id}`).set(auth(A))).status).toBe(404);
+      // Cancelled record: frozen.
+      expect((await request(app).post(`/api/eway-bills/${c.body.id}/cancel`).set(auth(manager)).send({ reason: "Synthetic delete-guard cancel" })).status).toBe(200);
+      const refused = await request(app).delete(`/api/attachments/${second.id}`).set(auth(A));
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.message).toMatch(/cancelled E-Way Bill/);
+      expect((await request(app).delete(`/api/attachments/${second.id}`).set(auth(B))).status).toBe(404); // still 404 for another company
+      const still = await request(app).get(`/api/attachments/${second.id}`).set(auth(A)).buffer(true).parse(binary);
+      expect(still.status).toBe(200); // the file and its object are untouched
+      expect((still.body as Buffer).equals(PDF)).toBe(true);
+      const log = (await request(app).get(`/api/audit?entityType=Attachment&entityId=${second.id}`).set(auth(A))).body as Array<{ action: string }>;
+      expect(log.some((e) => e.action === "file.deleted")).toBe(false); // the refused delete wrote no audit event
+    });
+
+    it("never deletes an E-Way Bill file once a racing cancellation has won", async () => {
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic delete race" };
+      for (let round = 0; round < 3; round++) {
+        const created = request(app).post("/api/eway-bills").set(auth(manager));
+        for (const [k, v] of Object.entries({ ...base, ewbNumber: `39100000003${round}` })) created.field(k, String(v));
+        const c = await created.attach("file", PDF, { filename: "r.pdf", contentType: "application/pdf" });
+        expect(c.status, JSON.stringify(c.body)).toBe(201);
+        const att = (c.body.attachments as Array<{ id: number }>)[0].id;
+        const [del, cancel] = await Promise.all([
+          request(app).delete(`/api/attachments/${att}`).set(auth(manager)),
+          request(app).post(`/api/eway-bills/${c.body.id}/cancel`).set(auth(A)).send({ reason: "Synthetic delete-vs-cancel" }),
+        ]);
+        expect(cancel.status).toBe(200);
+        expect([204, 409]).toContain(del.status);
+        const files = (await request(app).get(`/api/eway-bills/${c.body.id}`).set(auth(A))).body.attachments as unknown[];
+        expect(files).toHaveLength(del.status === 204 ? 0 : 1); // deleted before the cancel, or kept
+      }
+    });
+
+    it("never deletes a POD signature (any role), keeps photo deletion and cross-company 404 unchanged", async () => {
+      const pod = (await request(app).get(`/api/pods/${id.pod}`).set(auth(A))).body as { attachments: Array<{ id: number; role: string }> };
+      const sig = pod.attachments.find((a) => a.role === "SIGNATURE")!;
+      expect(sig).toBeTruthy();
+      // 1-2. Neither the driver of the trip nor an admin can remove it.
+      for (const who of [driverUser, A]) {
+        const r = await request(app).delete(`/api/attachments/${sig.id}`).set(auth(who));
+        expect(r.status).toBe(409);
+        expect(r.body.error.message).toBe("A delivery signature is never removed");
+      }
+      // 6. Another company still gets 404, not 409 (no existence leak).
+      expect((await request(app).delete(`/api/attachments/${sig.id}`).set(auth(B))).status).toBe(404);
+      // 3. The record is still on the POD.
+      const after = (await request(app).get(`/api/pods/${id.pod}`).set(auth(A))).body as { attachments: Array<{ id: number; role: string }> };
+      expect(after.attachments.some((a) => a.id === sig.id && a.role === "SIGNATURE")).toBe(true);
+      // 4. The stored object is still readable, byte for byte.
+      const file = await request(app).get(`/api/attachments/${sig.id}`).set(auth(A)).buffer(true).parse(binary);
+      expect(file.status).toBe(200);
+      expect((file.body as Buffer).equals(PNG)).toBe(true);
+      const log = (await request(app).get(`/api/audit?entityType=Attachment&entityId=${sig.id}`).set(auth(A))).body as Array<{ action: string }>;
+      expect(log.some((e) => e.action === "file.deleted")).toBe(false);
+      // 5. Deleting an ordinary POD photo still works for an authorised role.
+      const added = await request(app).post(`/api/pods/${id.pod}/photos`).set(auth(manager)).attach("photos", JPG, { filename: "to-delete.jpg", contentType: "image/jpeg" });
+      expect(added.status, JSON.stringify(added.body)).toBe(201);
+      const photoId = (added.body as Array<{ id: number }>)[0].id;
+      expect((await request(app).delete(`/api/attachments/${photoId}`).set(auth(B))).status).toBe(404); // 6. cross-company
+      expect((await request(app).delete(`/api/attachments/${photoId}`).set(auth(manager))).status).toBe(204);
+      expect((await request(app).get(`/api/attachments/${photoId}`).set(auth(A))).status).toBe(404);
+      // 7. The cancelled E-Way Bill protection is unchanged.
+      const base = { orderId: id.order, documentDate: iso(-1), validUntil: iso(2), supplierName: "Delhi Traders", recipientName: "Delhi Traders Retail", placeOfDispatch: "Gurugram", placeOfDelivery: "New Delhi", goodsDescription: "Synthetic signature-guard check" };
+      const created = request(app).post("/api/eway-bills").set(auth(manager));
+      for (const [k, v] of Object.entries({ ...base, ewbNumber: "391000000011" })) created.field(k, String(v));
+      const c = await created.attach("file", PDF, { filename: "s.pdf", contentType: "application/pdf" });
+      expect(c.status, JSON.stringify(c.body)).toBe(201);
+      expect((await request(app).post(`/api/eway-bills/${c.body.id}/cancel`).set(auth(manager)).send({ reason: "Synthetic cancel" })).status).toBe(200);
+      expect((await request(app).delete(`/api/attachments/${c.body.attachments[0].id}`).set(auth(A))).status).toBe(409);
+    });
   });
 });
