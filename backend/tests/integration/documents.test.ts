@@ -147,7 +147,7 @@ describe.skipIf(!enabled)("transport documents, compliance and POD (integration)
       expect(file.status).toBe(200);
       expect(file.headers["content-type"]).toMatch(/image\/jpeg/);
       expect(Buffer.compare(file.body as Buffer, JPG)).toBe(0);
-      const tampered = link.body.url.replace(/.$/, (c: string) => (c === "A" ? "B" : "A"));
+      const tampered = ((u: string, i: number) => u.slice(0, i) + (u[i] === "A" ? "B" : "A") + u.slice(i + 1))(link.body.url, link.body.url.lastIndexOf(".") + 22); // a mid-signature character (the last one only carries 4 bits)
       expect((await request(app).get(tampered)).status).toBe(404);
       expect((await request(app).get(`/api/attachments/${id.licenceFront}/url`).set(auth(B))).status).toBe(404);
       expect((await request(app).get(`/api/attachments/${id.licenceFront}`).set(auth(B))).status).toBe(404);
